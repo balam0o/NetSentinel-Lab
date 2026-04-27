@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.api.schemas.events import EventResponse
-from app.api.schemas.incidents import IncidentResponse, IncidentUpdate
+from app.api.schemas.events import EventResponse, SeverityLevel
+from app.api.schemas.incidents import IncidentResponse, IncidentStatus, IncidentUpdate
 from app.db.models import Event, Incident, IncidentEvent
 from app.db.session import get_db
 
@@ -18,8 +18,23 @@ DbSession = Annotated[Session, Depends(get_db)]
 def list_incidents(
     db: DbSession,
     limit: int = Query(default=50, ge=1, le=200),
+    status_filter: IncidentStatus | None = Query(default=None, alias="status"),
+    severity: SeverityLevel | None = None,
+    title_contains: str | None = None,
 ):
-    statement = select(Incident).order_by(desc(Incident.last_seen)).limit(limit)
+    statement = select(Incident)
+
+    if status_filter is not None:
+        statement = statement.where(Incident.status == status_filter)
+
+    if severity is not None:
+        statement = statement.where(Incident.severity == severity)
+
+    if title_contains is not None:
+        statement = statement.where(Incident.title.ilike(f"%{title_contains}%"))
+
+    statement = statement.order_by(desc(Incident.last_seen)).limit(limit)
+
     incidents = db.execute(statement).scalars().all()
     return incidents
 

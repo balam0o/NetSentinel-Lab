@@ -439,3 +439,143 @@ def test_stats_summary_reflects_closed_incident(client):
     stats = stats_response.json()
     assert stats["total_incidents"] == 1
     assert stats["open_incidents"] == 0
+
+def test_filter_events_by_source_and_severity(client):
+    events = [
+        {
+            "source": "falco",
+            "event_type": "reverse_shell_detected",
+            "severity": "critical",
+            "hostname": "node-1",
+            "container_name": "api-gateway",
+            "raw_event_json": {"rule": "Reverse shell detected"},
+        },
+        {
+            "source": "simulator",
+            "event_type": "port_scan_detected",
+            "severity": "medium",
+            "hostname": "node-2",
+            "container_name": "scanner-box",
+            "raw_event_json": {"ports": [21, 22, 80]},
+        },
+        {
+            "source": "falco",
+            "event_type": "credential_access",
+            "severity": "high",
+            "hostname": "node-3",
+            "container_name": "payments-service",
+            "raw_event_json": {"file": "/etc/shadow"},
+        },
+    ]
+
+    for payload in events:
+        response = client.post("/events/ingest", json=payload)
+        assert response.status_code == 201
+
+    response = client.get("/events?source=falco&severity=critical")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["source"] == "falco"
+    assert data[0]["severity"] == "critical"
+    assert data[0]["event_type"] == "reverse_shell_detected"
+
+
+def test_filter_events_by_event_type(client):
+    events = [
+        {
+            "source": "falco",
+            "event_type": "suspicious_process",
+            "severity": "high",
+            "hostname": "node-a",
+            "container_name": "container-a",
+            "raw_event_json": {"process": "nc"},
+        },
+        {
+            "source": "falco",
+            "event_type": "credential_access",
+            "severity": "high",
+            "hostname": "node-b",
+            "container_name": "container-b",
+            "raw_event_json": {"file": "/etc/shadow"},
+        },
+    ]
+
+    for payload in events:
+        response = client.post("/events/ingest", json=payload)
+        assert response.status_code == 201
+
+    response = client.get("/events?event_type=credential_access")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["event_type"] == "credential_access"
+
+
+def test_filter_incidents_by_status_and_severity(client):
+    critical_payload = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-20",
+        "container_name": "web-api",
+        "raw_event_json": {"rule": "Reverse shell detected"},
+    }
+
+    high_payload = {
+        "source": "falco",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-21",
+        "container_name": "billing-service",
+        "raw_event_json": {"file": "/etc/shadow"},
+    }
+
+    client.post("/events/ingest", json=critical_payload)
+    client.post("/events/ingest", json=high_payload)
+
+    incidents = client.get("/incidents").json()
+
+    critical_incident = next(
+        incident
+        for incident in incidents
+        if incident["title"] == "reverse_shell_detected on node-20/web-api"
+    )
+
+    close_response = client.patch(
+        f"/incidents/{critical_incident['id']}",
+        json={"status": "closed"},
+    )
+    assert close_response.status_code == 200
+
+    response = client.get("/incidents?status=closed&severity=critical")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["status"] == "closed"
+    assert data[0]["severity"] == "critical"
+    assert data[0]["title"] == "reverse_shell_detected on node-20/web-api"
+
+
+def test_filter_incidents_by_title_contains(client):
+    payload = {
+        "source": "falco",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-30",
+        "container_name": "payments-service",
+        "raw_event_json": {"file": "/etc/shadow"},
+    }
+
+    response = client.post("/events/ingest", json=payload)
+    assert response.status_code == 201
+
+    response = client.get("/incidents?title_contains=payments-service")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert len(data) == 1
+    assert "payments-service" in data[0]["title"]

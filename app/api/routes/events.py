@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from app.api.schemas.events import EventIngest, EventResponse
+from app.api.schemas.events import EventIngest, EventResponse, SeverityLevel
 from app.db.models import Event
 from app.db.session import get_db
 from app.services.correlator import correlate_event
@@ -42,8 +42,31 @@ def ingest_event(payload: EventIngest, db: DbSession):
 def list_events(
     db: DbSession,
     limit: int = Query(default=50, ge=1, le=200),
+    severity: SeverityLevel | None = None,
+    source: str | None = None,
+    event_type: str | None = None,
+    hostname: str | None = None,
+    container_name: str | None = None,
 ):
-    statement = select(Event).order_by(desc(Event.created_at)).limit(limit)
+    statement = select(Event)
+
+    if severity is not None:
+        statement = statement.where(Event.severity == severity)
+
+    if source is not None:
+        statement = statement.where(Event.source == source)
+
+    if event_type is not None:
+        statement = statement.where(Event.event_type == event_type)
+
+    if hostname is not None:
+        statement = statement.where(Event.hostname == hostname)
+
+    if container_name is not None:
+        statement = statement.where(Event.container_name == container_name)
+
+    statement = statement.order_by(desc(Event.created_at)).limit(limit)
+
     events = db.execute(statement).scalars().all()
     return events
 
