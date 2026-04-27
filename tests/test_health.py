@@ -306,3 +306,55 @@ def test_incident_events_endpoint_returns_multiple_related_events(client):
     data = response.json()
     assert len(data) == 2
     assert all(event["event_type"] == "reverse_shell_detected" for event in data)
+
+def test_stats_summary(client):
+    events = [
+        {
+            "source": "falco",
+            "event_type": "reverse_shell_detected",
+            "severity": "critical",
+            "hostname": "node-11",
+            "container_name": "api-gateway",
+            "raw_event_json": {"rule": "Reverse shell detected", "process": "bash"},
+        },
+        {
+            "source": "falco",
+            "event_type": "reverse_shell_detected",
+            "severity": "critical",
+            "hostname": "node-11",
+            "container_name": "api-gateway",
+            "raw_event_json": {"rule": "Reverse shell detected", "process": "sh"},
+        },
+        {
+            "source": "falco",
+            "event_type": "credential_access",
+            "severity": "high",
+            "hostname": "node-7",
+            "container_name": "payments-service",
+            "raw_event_json": {"file": "/etc/shadow"},
+        },
+        {
+            "source": "simulator",
+            "event_type": "port_scan_detected",
+            "severity": "medium",
+            "hostname": "node-2",
+            "container_name": "scanner-box",
+            "raw_event_json": {"ports": [21, 22, 80]},
+        },
+    ]
+
+    for payload in events:
+        response = client.post("/events/ingest", json=payload)
+        assert response.status_code == 201
+
+    response = client.get("/stats/summary")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert data["total_events"] == 4
+    assert data["total_incidents"] == 2
+    assert data["open_incidents"] == 2
+    assert data["incidents_by_severity"]["critical"] == 1
+    assert data["incidents_by_severity"]["high"] == 1
+    assert data["events_by_source"]["falco"] == 3
+    assert data["events_by_source"]["simulator"] == 1
