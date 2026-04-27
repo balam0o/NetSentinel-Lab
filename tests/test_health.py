@@ -1,11 +1,4 @@
-from fastapi.testclient import TestClient
-
-from app.api.main import app
-
-client = TestClient(app)
-
-
-def test_root():
+def test_root(client):
     response = client.get("/")
     assert response.status_code == 200
     data = response.json()
@@ -13,7 +6,7 @@ def test_root():
     assert data["docs"] == "/docs"
 
 
-def test_health():
+def test_health(client):
     response = client.get("/health")
     assert response.status_code == 200
     data = response.json()
@@ -21,7 +14,7 @@ def test_health():
     assert data["database"] == "up"
 
 
-def test_ingest_event():
+def test_ingest_event(client):
     payload = {
         "source": "falco",
         "event_type": "suspicious_process",
@@ -49,7 +42,17 @@ def test_ingest_event():
     assert "created_at" in data
 
 
-def test_list_events():
+def test_list_events(client):
+    payload = {
+        "source": "simulator",
+        "event_type": "network_probe",
+        "severity": "low",
+        "hostname": "node-a",
+        "container_name": "sensor-a",
+        "raw_event_json": {"message": "probe detected"},
+    }
+    client.post("/events/ingest", json=payload)
+
     response = client.get("/events")
     assert response.status_code == 200
 
@@ -58,7 +61,7 @@ def test_list_events():
     assert len(data) >= 1
 
 
-def test_get_event_by_id():
+def test_get_event_by_id(client):
     create_payload = {
         "source": "simulator",
         "event_type": "port_scan_detected",
@@ -83,12 +86,12 @@ def test_get_event_by_id():
     assert data["event_type"] == "port_scan_detected"
 
 
-def test_get_event_not_found():
+def test_get_event_not_found(client):
     response = client.get("/events/999999")
     assert response.status_code == 404
 
 
-def test_high_severity_event_creates_incident():
+def test_high_severity_event_creates_incident(client):
     payload = {
         "source": "falco",
         "event_type": "reverse_shell_detected",
@@ -121,7 +124,7 @@ def test_high_severity_event_creates_incident():
     assert matching[0]["status"] == "open"
 
 
-def test_medium_event_does_not_create_incident():
+def test_medium_event_does_not_create_incident(client):
     payload = {
         "source": "simulator",
         "event_type": "port_scan_detected",
@@ -142,7 +145,7 @@ def test_medium_event_does_not_create_incident():
     assert len(after) == len(before)
 
 
-def test_get_incident_by_id():
+def test_get_incident_by_id(client):
     payload = {
         "source": "falco",
         "event_type": "credential_access",
@@ -173,6 +176,6 @@ def test_get_incident_by_id():
     assert data["severity"] == "high"
 
 
-def test_get_incident_not_found():
+def test_get_incident_not_found(client):
     response = client.get("/incidents/999999")
     assert response.status_code == 404
