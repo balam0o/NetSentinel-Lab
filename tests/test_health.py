@@ -179,3 +179,44 @@ def test_get_incident_by_id(client):
 def test_get_incident_not_found(client):
     response = client.get("/incidents/999999")
     assert response.status_code == 404
+
+
+def test_get_incident_events(client):
+    payload = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-11",
+        "container_name": "api-gateway",
+        "raw_event_json": {
+            "rule": "Reverse shell detected",
+            "priority": "Critical",
+            "process": "bash",
+        },
+    }
+
+    create_response = client.post("/events/ingest", json=payload)
+    created_event = create_response.json()
+
+    incidents_response = client.get("/incidents")
+    incidents = incidents_response.json()
+
+    target = next(
+        incident
+        for incident in incidents
+        if incident["title"] == "reverse_shell_detected on node-11/api-gateway"
+    )
+
+    response = client.get(f"/incidents/{target['id']}/events")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert isinstance(data, list)
+    assert len(data) == 1
+    assert data[0]["id"] == created_event["id"]
+    assert data[0]["event_type"] == "reverse_shell_detected"
+
+
+def test_get_incident_events_not_found(client):
+    response = client.get("/incidents/999999/events")
+    assert response.status_code == 404

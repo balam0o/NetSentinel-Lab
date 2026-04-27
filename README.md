@@ -17,6 +17,7 @@ This version includes:
 - Incident listing endpoint
 - Incident lookup by ID
 - GitHub Actions CI
+- Incident-to-events lookup endpoint
 
 ## Stack
 
@@ -36,6 +37,7 @@ This version includes:
 - `GET /events/{id}`
 - `GET /incidents`
 - `GET /incidents/{id}`
+- `GET /incidents/{id}/events`
 
 ## Run locally
 

@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.api.schemas.events import EventResponse
 from app.api.schemas.incidents import IncidentResponse
-from app.db.models import Incident
+from app.db.models import Event, Incident, IncidentEvent
 from app.db.session import get_db
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -34,3 +35,29 @@ def get_incident(incident_id: int, db: DbSession):
         )
 
     return incident
+
+
+@router.get("/{incident_id}/events", response_model=list[EventResponse])
+def get_incident_events(
+    incident_id: int,
+    db: DbSession,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    incident = db.get(Incident, incident_id)
+
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident with id={incident_id} was not found",
+        )
+
+    statement = (
+        select(Event)
+        .join(IncidentEvent, IncidentEvent.event_id == Event.id)
+        .where(IncidentEvent.incident_id == incident_id)
+        .order_by(desc(Event.created_at))
+        .limit(limit)
+    )
+
+    events = db.execute(statement).scalars().all()
+    return events
