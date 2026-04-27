@@ -5,7 +5,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from app.api.schemas.events import EventResponse
-from app.api.schemas.incidents import IncidentResponse
+from app.api.schemas.incidents import IncidentResponse, IncidentUpdate
 from app.db.models import Event, Incident, IncidentEvent
 from app.db.session import get_db
 
@@ -33,6 +33,23 @@ def get_incident(incident_id: int, db: DbSession):
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Incident with id={incident_id} was not found",
         )
+
+    return incident
+
+
+@router.patch("/{incident_id}", response_model=IncidentResponse)
+def update_incident(incident_id: int, payload: IncidentUpdate, db: DbSession):
+    incident = db.get(Incident, incident_id)
+
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident with id={incident_id} was not found",
+        )
+
+    incident.status = payload.status
+    db.commit()
+    db.refresh(incident)
 
     return incident
 

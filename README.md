@@ -29,6 +29,7 @@ This version includes:
 - Incident lookup by ID
 - Incident-to-events lookup endpoint
 - Summary statistics endpoint
+- Manual incident status updates
 - Sample event simulation script
 - Automated tests with pytest
 - GitHub Actions CI

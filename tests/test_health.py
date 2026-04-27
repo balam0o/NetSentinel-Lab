@@ -358,3 +358,84 @@ def test_stats_summary(client):
     assert data["incidents_by_severity"]["high"] == 1
     assert data["events_by_source"]["falco"] == 3
     assert data["events_by_source"]["simulator"] == 1
+
+def test_close_incident(client):
+    payload = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-20",
+        "container_name": "web-api",
+        "raw_event_json": {
+            "rule": "Reverse shell detected",
+            "process": "bash",
+        },
+    }
+
+    create_response = client.post("/events/ingest", json=payload)
+    assert create_response.status_code == 201
+
+    incidents_response = client.get("/incidents")
+    incidents = incidents_response.json()
+
+    target = next(
+        incident
+        for incident in incidents
+        if incident["title"] == "reverse_shell_detected on node-20/web-api"
+    )
+
+    patch_response = client.patch(
+        f"/incidents/{target['id']}",
+        json={"status": "closed"},
+    )
+    assert patch_response.status_code == 200
+
+    updated = patch_response.json()
+    assert updated["id"] == target["id"]
+    assert updated["status"] == "closed"
+
+
+def test_patch_incident_not_found(client):
+    response = client.patch(
+        "/incidents/999999",
+        json={"status": "closed"},
+    )
+    assert response.status_code == 404
+
+
+def test_stats_summary_reflects_closed_incident(client):
+    payload = {
+        "source": "falco",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-30",
+        "container_name": "billing-service",
+        "raw_event_json": {
+            "file": "/etc/shadow",
+        },
+    }
+
+    create_response = client.post("/events/ingest", json=payload)
+    assert create_response.status_code == 201
+
+    incidents_response = client.get("/incidents")
+    incidents = incidents_response.json()
+
+    target = next(
+        incident
+        for incident in incidents
+        if incident["title"] == "credential_access on node-30/billing-service"
+    )
+
+    close_response = client.patch(
+        f"/incidents/{target['id']}",
+        json={"status": "closed"},
+    )
+    assert close_response.status_code == 200
+
+    stats_response = client.get("/stats/summary")
+    assert stats_response.status_code == 200
+
+    stats = stats_response.json()
+    assert stats["total_incidents"] == 1
+    assert stats["open_incidents"] == 0

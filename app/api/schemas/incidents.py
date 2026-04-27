@@ -20,3 +20,7 @@ class IncidentResponse(BaseModel):
     model_config = {
         "from_attributes": True,
     }
+
+
+class IncidentUpdate(BaseModel):
+    status: IncidentStatus
