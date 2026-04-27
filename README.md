@@ -1,16 +1,21 @@
 # NetSentinel Lab
 
-NetSentinel Lab is a cloud-native defensive lab built to ingest security events, store them in PostgreSQL, and later correlate them into incidents.
+NetSentinel Lab is a cloud-native defensive lab built to ingest security events, store them in PostgreSQL, and correlate high-severity events into incidents.
 
 ## Current scope
 
-This first version includes:
+This version includes:
 
 - FastAPI service
 - PostgreSQL database
 - Docker Compose environment
 - Health check with real database validation
-- Base data model for events and incidents
+- Event ingestion endpoint
+- Event listing endpoint
+- Event lookup by ID
+- Automatic incident creation for high-severity events
+- Incident listing endpoint
+- Incident lookup by ID
 - GitHub Actions CI
 
 ## Stack
@@ -22,13 +27,18 @@ This first version includes:
 - Docker Compose
 - GitHub Actions
 
-## Project structure
+## Available endpoints
 
-```text
-app/
-  api/
-  core/
-  db/
-docker/
-infra/
-tests/
+- `GET /`
+- `GET /health`
+- `POST /events/ingest`
+- `GET /events`
+- `GET /events/{id}`
+- `GET /incidents`
+- `GET /incidents/{id}`
+
+## Run locally
+
+```bash
+cp .env.example .env
+docker compose -f infra/docker-compose.yml up --build

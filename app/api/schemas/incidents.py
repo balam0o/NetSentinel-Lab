@@ -1,0 +1,22 @@
+from datetime import datetime
+from typing import Literal
+
+from pydantic import BaseModel
+
+
+IncidentStatus = Literal["open", "closed"]
+SeverityLevel = Literal["low", "medium", "high", "critical"]
+
+
+class IncidentResponse(BaseModel):
+    id: int
+    title: str
+    description: str | None
+    severity: SeverityLevel
+    status: IncidentStatus
+    first_seen: datetime
+    last_seen: datetime
+
+    model_config = {
+        "from_attributes": True,
+    }
