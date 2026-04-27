@@ -1,6 +1,17 @@
 # NetSentinel Lab
 
-NetSentinel Lab is a cloud-native defensive lab built to ingest security events, store them in PostgreSQL, and correlate high-severity events into incidents.
+NetSentinel Lab is a cloud-native defensive lab built to ingest security events, store them in PostgreSQL, correlate high-severity events into incidents, and expose a clean API for investigation workflows.
+
+This project is designed as a practical portfolio piece focused on:
+
+- security event ingestion
+- basic detection correlation
+- incident creation
+- event-to-incident investigation
+- reproducible local environments with Docker
+- backend engineering with Python, FastAPI, PostgreSQL, and SQLAlchemy
+
+---
 
 ## Current scope
 
@@ -16,31 +27,61 @@ This version includes:
 - Automatic incident creation for high-severity events
 - Incident listing endpoint
 - Incident lookup by ID
-- GitHub Actions CI
 - Incident-to-events lookup endpoint
+- Sample event simulation script
+- Automated tests with pytest
+- GitHub Actions CI
 
-## Stack
+---
 
-- Python
-- FastAPI
-- PostgreSQL
-- SQLAlchemy
-- Docker Compose
-- GitHub Actions
+## Why this project
 
-## Available endpoints
+NetSentinel Lab was built to simulate part of a defensive security workflow in a simple but realistic way.
 
-- `GET /`
-- `GET /health`
-- `POST /events/ingest`
-- `GET /events`
-- `GET /events/{id}`
-- `GET /incidents`
-- `GET /incidents/{id}`
-- `GET /incidents/{id}/events`
+It receives security events such as:
 
-## Run locally
+- suspicious process execution
+- reverse shell detections
+- credential access attempts
+- simulated port scans
 
-```bash
-cp .env.example .env
-docker compose -f infra/docker-compose.yml up --build
+Then it applies a basic correlation rule set:
+
+- `high` and `critical` events create or update incidents
+- `low` and `medium` events are stored but do not create incidents yet
+
+This makes the project useful as a starting point for a future SOC-style lab, incident analysis service, or cloud-native security platform.
+
+---
+
+## Tech stack
+
+- **Python**
+- **FastAPI**
+- **PostgreSQL**
+- **SQLAlchemy**
+- **Docker Compose**
+- **pytest**
+- **GitHub Actions**
+
+---
+
+## Project structure
+
+```text
+netsentinel-lab/
+├─ app/
+│  ├─ api/
+│  │  ├─ routes/
+│  │  └─ schemas/
+│  ├─ core/
+│  ├─ db/
+│  └─ services/
+├─ docker/
+├─ infra/
+├─ lab/
+│  └─ sample_events/
+├─ scripts/
+├─ tests/
+└─ .github/
+   └─ workflows/

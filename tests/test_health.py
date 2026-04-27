@@ -220,3 +220,89 @@ def test_get_incident_events(client):
 def test_get_incident_events_not_found(client):
     response = client.get("/incidents/999999/events")
     assert response.status_code == 404
+
+def test_multiple_high_severity_events_create_single_incident(client):
+    payload_1 = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-11",
+        "container_name": "api-gateway",
+        "raw_event_json": {
+            "rule": "Reverse shell detected",
+            "process": "bash",
+        },
+    }
+
+    payload_2 = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-11",
+        "container_name": "api-gateway",
+        "raw_event_json": {
+            "rule": "Reverse shell detected",
+            "process": "sh",
+        },
+    }
+
+    response_1 = client.post("/events/ingest", json=payload_1)
+    response_2 = client.post("/events/ingest", json=payload_2)
+
+    assert response_1.status_code == 201
+    assert response_2.status_code == 201
+
+    incidents_response = client.get("/incidents")
+    assert incidents_response.status_code == 200
+
+    incidents = incidents_response.json()
+    matching = [
+        incident
+        for incident in incidents
+        if incident["title"] == "reverse_shell_detected on node-11/api-gateway"
+    ]
+
+    assert len(matching) == 1
+
+
+def test_incident_events_endpoint_returns_multiple_related_events(client):
+    payload_1 = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-11",
+        "container_name": "api-gateway",
+        "raw_event_json": {
+            "rule": "Reverse shell detected",
+            "process": "bash",
+        },
+    }
+
+    payload_2 = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-11",
+        "container_name": "api-gateway",
+        "raw_event_json": {
+            "rule": "Reverse shell detected",
+            "process": "sh",
+        },
+    }
+
+    client.post("/events/ingest", json=payload_1)
+    client.post("/events/ingest", json=payload_2)
+
+    incidents = client.get("/incidents").json()
+    target = next(
+        incident
+        for incident in incidents
+        if incident["title"] == "reverse_shell_detected on node-11/api-gateway"
+    )
+
+    response = client.get(f"/incidents/{target['id']}/events")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert len(data) == 2
+    assert all(event["event_type"] == "reverse_shell_detected" for event in data)
