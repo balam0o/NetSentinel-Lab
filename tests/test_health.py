@@ -579,3 +579,118 @@ def test_filter_incidents_by_title_contains(client):
     data = response.json()
     assert len(data) == 1
     assert "payments-service" in data[0]["title"]
+
+def test_paginate_events_with_limit_and_offset(client):
+    payloads = [
+        {
+            "source": "falco",
+            "event_type": f"event_{index}",
+            "severity": "high",
+            "hostname": f"node-{index}",
+            "container_name": f"container-{index}",
+            "raw_event_json": {"index": index},
+        }
+        for index in range(3)
+    ]
+
+    for payload in payloads:
+        response = client.post("/events/ingest", json=payload)
+        assert response.status_code == 201
+
+    response = client.get("/events?sort_by=event_type&sort_order=asc&limit=1&offset=1")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["event_type"] == "event_1"
+
+
+def test_sort_events_by_hostname_ascending(client):
+    payloads = [
+        {
+            "source": "falco",
+            "event_type": "credential_access",
+            "severity": "high",
+            "hostname": "node-z",
+            "container_name": "container-a",
+            "raw_event_json": {"file": "/etc/shadow"},
+        },
+        {
+            "source": "falco",
+            "event_type": "credential_access",
+            "severity": "high",
+            "hostname": "node-a",
+            "container_name": "container-b",
+            "raw_event_json": {"file": "/etc/passwd"},
+        },
+    ]
+
+    for payload in payloads:
+        response = client.post("/events/ingest", json=payload)
+        assert response.status_code == 201
+
+    response = client.get("/events?sort_by=hostname&sort_order=asc")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["hostname"] == "node-a"
+    assert data[1]["hostname"] == "node-z"
+
+
+def test_paginate_incidents_with_limit_and_offset(client):
+    payloads = [
+        {
+            "source": "falco",
+            "event_type": f"incident_type_{index}",
+            "severity": "high",
+            "hostname": f"node-{index}",
+            "container_name": f"service-{index}",
+            "raw_event_json": {"index": index},
+        }
+        for index in range(3)
+    ]
+
+    for payload in payloads:
+        response = client.post("/events/ingest", json=payload)
+        assert response.status_code == 201
+
+    response = client.get("/incidents?sort_by=title&sort_order=asc&limit=1&offset=1")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert len(data) == 1
+    assert data[0]["title"] == "incident_type_1 on node-1/service-1"
+
+
+def test_sort_incidents_by_title_descending(client):
+    payloads = [
+        {
+            "source": "falco",
+            "event_type": "aaa_event",
+            "severity": "high",
+            "hostname": "node-1",
+            "container_name": "service-1",
+            "raw_event_json": {"index": 1},
+        },
+        {
+            "source": "falco",
+            "event_type": "zzz_event",
+            "severity": "high",
+            "hostname": "node-2",
+            "container_name": "service-2",
+            "raw_event_json": {"index": 2},
+        },
+    ]
+
+    for payload in payloads:
+        response = client.post("/events/ingest", json=payload)
+        assert response.status_code == 201
+
+    response = client.get("/incidents?sort_by=title&sort_order=desc")
+    assert response.status_code == 200
+
+    data = response.json()
+    assert len(data) == 2
+    assert data[0]["title"] == "zzz_event on node-2/service-2"
+    assert data[1]["title"] == "aaa_event on node-1/service-1"

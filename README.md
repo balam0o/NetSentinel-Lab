@@ -34,6 +34,7 @@ This version includes:
 - Sample event simulation script
 - Automated tests with pytest
 - GitHub Actions CI
+- Pagination and configurable sorting
 
 ---
 

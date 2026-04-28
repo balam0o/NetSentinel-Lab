@@ -1,7 +1,7 @@
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import desc, select
+from sqlalchemy import asc, desc, select
 from sqlalchemy.orm import Session
 
 from app.api.schemas.events import EventResponse, SeverityLevel
@@ -13,14 +13,20 @@ router = APIRouter(prefix="/incidents", tags=["incidents"])
 
 DbSession = Annotated[Session, Depends(get_db)]
 
+IncidentSortField = Literal["last_seen", "first_seen", "title", "status", "severity"]
+SortOrder = Literal["asc", "desc"]
+
 
 @router.get("", response_model=list[IncidentResponse])
 def list_incidents(
     db: DbSession,
     limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     status_filter: IncidentStatus | None = Query(default=None, alias="status"),
     severity: SeverityLevel | None = None,
     title_contains: str | None = None,
+    sort_by: IncidentSortField = "last_seen",
+    sort_order: SortOrder = "desc",
 ):
     statement = select(Incident)
 
@@ -33,7 +39,18 @@ def list_incidents(
     if title_contains is not None:
         statement = statement.where(Incident.title.ilike(f"%{title_contains}%"))
 
-    statement = statement.order_by(desc(Incident.last_seen)).limit(limit)
+    sort_column_map = {
+        "last_seen": Incident.last_seen,
+        "first_seen": Incident.first_seen,
+        "title": Incident.title,
+        "status": Incident.status,
+        "severity": Incident.severity,
+    }
+
+    sort_column = sort_column_map[sort_by]
+    order_clause = asc(sort_column) if sort_order == "asc" else desc(sort_column)
+
+    statement = statement.order_by(order_clause).offset(offset).limit(limit)
 
     incidents = db.execute(statement).scalars().all()
     return incidents
