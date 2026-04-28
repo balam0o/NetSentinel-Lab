@@ -1,10 +1,12 @@
-from typing import Annotated, Literal
+import re
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import asc, desc, select
 from sqlalchemy.orm import Session
 
 from app.api.schemas.events import EventIngest, EventResponse, SeverityLevel
+from app.api.schemas.falco import FalcoEventIngest
 from app.db.models import Event
 from app.db.session import get_db
 from app.services.correlator import correlate_event
@@ -15,6 +17,47 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 EventSortField = Literal["created_at", "source", "event_type", "hostname", "container_name"]
 SortOrder = Literal["asc", "desc"]
+
+
+def persist_event(db: Session, event: Event) -> Event:
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+
+    correlate_event(db, event)
+
+    return event
+
+
+def normalize_falco_rule(rule: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", rule.strip().lower())
+    normalized = normalized.strip("_")
+    return normalized or "falco_event"
+
+
+def map_falco_priority_to_severity(priority: str) -> SeverityLevel:
+    value = priority.strip().lower()
+
+    if value in {"emergency", "alert", "critical"}:
+        return "critical"
+    if value == "error":
+        return "high"
+    if value in {"warning", "notice"}:
+        return "medium"
+
+    return "low"
+
+
+def first_non_empty_string(values: list[Any]) -> str | None:
+    for value in values:
+        if value is None:
+            continue
+
+        text = str(value).strip()
+        if text:
+            return text
+
+    return None
 
 
 @router.post(
@@ -32,13 +75,44 @@ def ingest_event(payload: EventIngest, db: DbSession):
         raw_event_json=payload.raw_event_json,
     )
 
-    db.add(event)
-    db.commit()
-    db.refresh(event)
+    return persist_event(db, event)
 
-    correlate_event(db, event)
 
-    return event
+@router.post(
+    "/ingest/falco",
+    response_model=EventResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def ingest_falco_event(payload: FalcoEventIngest, db: DbSession):
+    output_fields = payload.output_fields
+
+    event = Event(
+        source="falco",
+        event_type=normalize_falco_rule(payload.rule),
+        severity=map_falco_priority_to_severity(payload.priority),
+        hostname=first_non_empty_string(
+            [
+                output_fields.get("evt.hostname"),
+                output_fields.get("hostname"),
+                output_fields.get("k8s.node.name"),
+            ]
+        ),
+        container_name=first_non_empty_string(
+            [
+                output_fields.get("container.name"),
+                output_fields.get("k8s.pod.name"),
+                output_fields.get("container.id"),
+            ]
+        ),
+        raw_event_json={
+            "output": payload.output,
+            "priority": payload.priority,
+            "rule": payload.rule,
+            "output_fields": output_fields,
+        },
+    )
+
+    return persist_event(db, event)
 
 
 @router.get("", response_model=list[EventResponse])

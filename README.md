@@ -28,13 +28,14 @@ This version includes:
 - Incident listing endpoint
 - Incident lookup by ID
 - Incident-to-events lookup endpoint
+- Incident detail endpoint with linked events
 - Summary statistics endpoint
 - Manual incident status updates
 - Filtering for events and incidents
+- Pagination and configurable sorting
 - Sample event simulation script
 - Automated tests with pytest
 - GitHub Actions CI
-- Pagination and configurable sorting
 
 ---
 

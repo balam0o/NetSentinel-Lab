@@ -694,3 +694,129 @@ def test_sort_incidents_by_title_descending(client):
     assert len(data) == 2
     assert data[0]["title"] == "zzz_event on node-2/service-2"
     assert data[1]["title"] == "aaa_event on node-1/service-1"
+
+def test_get_incident_detail(client):
+    payload_1 = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-99",
+        "container_name": "gateway-service",
+        "raw_event_json": {
+            "rule": "Reverse shell detected",
+            "process": "bash",
+        },
+    }
+
+    payload_2 = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-99",
+        "container_name": "gateway-service",
+        "raw_event_json": {
+            "rule": "Reverse shell detected",
+            "process": "sh",
+        },
+    }
+
+    response_1 = client.post("/events/ingest", json=payload_1)
+    response_2 = client.post("/events/ingest", json=payload_2)
+
+    assert response_1.status_code == 201
+    assert response_2.status_code == 201
+
+    incidents_response = client.get(
+        "/incidents?title_contains=gateway-service&sort_by=title&sort_order=asc"
+    )
+    assert incidents_response.status_code == 200
+
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+
+    incident_id = incidents[0]["id"]
+
+    detail_response = client.get(f"/incidents/{incident_id}/detail")
+    assert detail_response.status_code == 200
+
+    data = detail_response.json()
+    assert data["incident"]["id"] == incident_id
+    assert data["incident"]["title"] == "reverse_shell_detected on node-99/gateway-service"
+    assert data["event_count"] == 2
+    assert len(data["events"]) == 2
+    assert all(event["event_type"] == "reverse_shell_detected" for event in data["events"])
+
+
+def test_get_incident_detail_not_found(client):
+    response = client.get("/incidents/999999/detail")
+    assert response.status_code == 404
+
+def test_ingest_falco_event_adapter(client):
+    payload = {
+        "output": "A shell was spawned in a container",
+        "priority": "Error",
+        "rule": "Terminal shell in container",
+        "output_fields": {
+            "evt.hostname": "node-falco",
+            "container.name": "payments-api",
+            "proc.name": "bash",
+        },
+    }
+
+    response = client.post("/events/ingest/falco", json=payload)
+    assert response.status_code == 201
+
+    data = response.json()
+    assert data["source"] == "falco"
+    assert data["event_type"] == "terminal_shell_in_container"
+    assert data["severity"] == "high"
+    assert data["hostname"] == "node-falco"
+    assert data["container_name"] == "payments-api"
+    assert data["raw_event_json"]["rule"] == "Terminal shell in container"
+    assert data["raw_event_json"]["priority"] == "Error"
+
+
+def test_falco_ingestion_creates_incident_for_high_priority(client):
+    payload = {
+        "output": "A shell was spawned in a container",
+        "priority": "Error",
+        "rule": "Terminal shell in container",
+        "output_fields": {
+            "evt.hostname": "node-falco",
+            "container.name": "payments-api",
+        },
+    }
+
+    response = client.post("/events/ingest/falco", json=payload)
+    assert response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=payments-api")
+    assert incidents_response.status_code == 200
+
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+    assert incidents[0]["title"] == "terminal_shell_in_container on node-falco/payments-api"
+    assert incidents[0]["severity"] == "high"
+
+
+def test_falco_warning_maps_to_medium_and_does_not_create_incident(client):
+    payload = {
+        "output": "Unexpected process detected",
+        "priority": "Warning",
+        "rule": "Suspicious process",
+        "output_fields": {
+            "evt.hostname": "node-warning",
+            "container.name": "worker-service",
+        },
+    }
+
+    response = client.post("/events/ingest/falco", json=payload)
+    assert response.status_code == 201
+
+    data = response.json()
+    assert data["severity"] == "medium"
+
+    incidents_response = client.get("/incidents?title_contains=worker-service")
+    assert incidents_response.status_code == 200
+    incidents = incidents_response.json()
+    assert len(incidents) == 0

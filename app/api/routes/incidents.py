@@ -5,7 +5,12 @@ from sqlalchemy import asc, desc, select
 from sqlalchemy.orm import Session
 
 from app.api.schemas.events import EventResponse, SeverityLevel
-from app.api.schemas.incidents import IncidentResponse, IncidentStatus, IncidentUpdate
+from app.api.schemas.incidents import (
+    IncidentDetailResponse,
+    IncidentResponse,
+    IncidentStatus,
+    IncidentUpdate,
+)
 from app.db.models import Event, Incident, IncidentEvent
 from app.db.session import get_db
 
@@ -54,6 +59,37 @@ def list_incidents(
 
     incidents = db.execute(statement).scalars().all()
     return incidents
+
+
+@router.get("/{incident_id}/detail", response_model=IncidentDetailResponse)
+def get_incident_detail(
+    incident_id: int,
+    db: DbSession,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    incident = db.get(Incident, incident_id)
+
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident with id={incident_id} was not found",
+        )
+
+    statement = (
+        select(Event)
+        .join(IncidentEvent, IncidentEvent.event_id == Event.id)
+        .where(IncidentEvent.incident_id == incident_id)
+        .order_by(desc(Event.created_at))
+        .limit(limit)
+    )
+
+    events = db.execute(statement).scalars().all()
+
+    return IncidentDetailResponse(
+        incident=incident,
+        events=events,
+        event_count=len(events),
+    )
 
 
 @router.get("/{incident_id}", response_model=IncidentResponse)

@@ -3,6 +3,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from app.api.schemas.events import EventResponse
+
 
 IncidentStatus = Literal["open", "closed"]
 SeverityLevel = Literal["low", "medium", "high", "critical"]
@@ -24,3 +26,9 @@ class IncidentResponse(BaseModel):
 
 class IncidentUpdate(BaseModel):
     status: IncidentStatus
+
+
+class IncidentDetailResponse(BaseModel):
+    incident: IncidentResponse
+    events: list[EventResponse]
+    event_count: int
