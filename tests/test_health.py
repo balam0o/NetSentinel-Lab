@@ -909,3 +909,89 @@ def test_falco_timeline_summary_uses_output_when_rule_not_present_in_raw(client)
     data = timeline_response.json()
     assert data["event_count"] == 1
     assert data["timeline"][0]["summary"] == "Outbound connection"
+
+def test_ingest_suricata_event_adapter(client):
+    payload = {
+        "timestamp": "2026-04-27T10:48:58.801038Z",
+        "event_type": "alert",
+        "src_ip": "10.10.0.5",
+        "src_port": 51514,
+        "dest_ip": "10.10.0.10",
+        "dest_port": 443,
+        "proto": "TCP",
+        "app_proto": "tls",
+        "host": "edge-firewall",
+        "alert": {
+            "signature": "ET MALWARE CnC Beacon Activity",
+            "severity": 2
+        }
+    }
+
+    response = client.post("/events/ingest/suricata", json=payload)
+    assert response.status_code == 201
+
+    data = response.json()
+    assert data["source"] == "suricata"
+    assert data["event_type"] == "et_malware_cnc_beacon_activity"
+    assert data["severity"] == "high"
+    assert data["hostname"] == "edge-firewall"
+    assert data["container_name"] == "tls"
+    assert data["raw_event_json"]["dest_ip"] == "10.10.0.10"
+
+
+def test_suricata_ingestion_creates_incident_for_high_severity(client):
+    payload = {
+        "timestamp": "2026-04-27T10:48:58.801038Z",
+        "event_type": "alert",
+        "src_ip": "10.10.0.5",
+        "src_port": 51514,
+        "dest_ip": "10.10.0.10",
+        "dest_port": 443,
+        "proto": "TCP",
+        "app_proto": "tls",
+        "host": "edge-firewall",
+        "alert": {
+            "signature": "ET MALWARE CnC Beacon Activity",
+            "severity": 2
+        }
+    }
+
+    response = client.post("/events/ingest/suricata", json=payload)
+    assert response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=edge-firewall")
+    assert incidents_response.status_code == 200
+
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+    assert incidents[0]["title"] == "et_malware_cnc_beacon_activity on edge-firewall/tls"
+    assert incidents[0]["severity"] == "high"
+
+
+def test_suricata_medium_severity_does_not_create_incident(client):
+    payload = {
+        "timestamp": "2026-04-27T10:48:58.801038Z",
+        "event_type": "alert",
+        "src_ip": "10.10.0.20",
+        "src_port": 44444,
+        "dest_ip": "10.10.0.30",
+        "dest_port": 80,
+        "proto": "TCP",
+        "app_proto": "http",
+        "host": "web-sensor",
+        "alert": {
+            "signature": "ET POLICY Suspicious User Agent",
+            "severity": 3
+        }
+    }
+
+    response = client.post("/events/ingest/suricata", json=payload)
+    assert response.status_code == 201
+
+    data = response.json()
+    assert data["severity"] == "medium"
+
+    incidents_response = client.get("/incidents?title_contains=web-sensor")
+    assert incidents_response.status_code == 200
+    incidents = incidents_response.json()
+    assert len(incidents) == 0

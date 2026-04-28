@@ -23,6 +23,7 @@ This version includes:
 - Health check with real database validation
 - Generic event ingestion endpoint
 - Falco-compatible ingestion endpoint
+- Suricata-compatible ingestion endpoint
 - Event listing endpoint
 - Event lookup by ID
 - Automatic incident creation for high-severity events
@@ -52,6 +53,7 @@ It receives security events such as:
 - credential access attempts
 - simulated port scans
 - Falco-style runtime alerts
+- Suricata-style network alerts
 
 Then it applies a basic correlation rule set:
 

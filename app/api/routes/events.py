@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.api.schemas.events import EventIngest, EventResponse, SeverityLevel
 from app.api.schemas.falco import FalcoEventIngest
+from app.api.schemas.suricata import SuricataEventIngest
 from app.db.models import Event
 from app.db.session import get_db
 from app.services.correlator import correlate_event
@@ -29,10 +30,10 @@ def persist_event(db: Session, event: Event) -> Event:
     return event
 
 
-def normalize_falco_rule(rule: str) -> str:
-    normalized = re.sub(r"[^a-z0-9]+", "_", rule.strip().lower())
+def normalize_event_name(value: str) -> str:
+    normalized = re.sub(r"[^a-z0-9]+", "_", value.strip().lower())
     normalized = normalized.strip("_")
-    return normalized or "falco_event"
+    return normalized or "normalized_event"
 
 
 def map_falco_priority_to_severity(priority: str) -> SeverityLevel:
@@ -45,6 +46,16 @@ def map_falco_priority_to_severity(priority: str) -> SeverityLevel:
     if value in {"warning", "notice"}:
         return "medium"
 
+    return "low"
+
+
+def map_suricata_severity(severity: int | None) -> SeverityLevel:
+    if severity == 1:
+        return "critical"
+    if severity == 2:
+        return "high"
+    if severity == 3:
+        return "medium"
     return "low"
 
 
@@ -88,7 +99,7 @@ def ingest_falco_event(payload: FalcoEventIngest, db: DbSession):
 
     event = Event(
         source="falco",
-        event_type=normalize_falco_rule(payload.rule),
+        event_type=normalize_event_name(payload.rule),
         severity=map_falco_priority_to_severity(payload.priority),
         hostname=first_non_empty_string(
             [
@@ -110,6 +121,27 @@ def ingest_falco_event(payload: FalcoEventIngest, db: DbSession):
             "rule": payload.rule,
             "output_fields": output_fields,
         },
+    )
+
+    return persist_event(db, event)
+
+
+@router.post(
+    "/ingest/suricata",
+    response_model=EventResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def ingest_suricata_event(payload: SuricataEventIngest, db: DbSession):
+    signature = payload.alert.get("signature") if payload.alert else None
+    signature_severity = payload.alert.get("severity") if payload.alert else None
+
+    event = Event(
+        source="suricata",
+        event_type=normalize_event_name(signature or payload.event_type),
+        severity=map_suricata_severity(signature_severity),
+        hostname=first_non_empty_string([payload.host, payload.dest_ip, payload.src_ip]),
+        container_name=first_non_empty_string([payload.app_proto, payload.proto]),
+        raw_event_json=payload.model_dump(),
     )
 
     return persist_event(db, event)
