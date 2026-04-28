@@ -21,7 +21,8 @@ This version includes:
 - PostgreSQL database
 - Docker Compose environment
 - Health check with real database validation
-- Event ingestion endpoint
+- Generic event ingestion endpoint
+- Falco-compatible ingestion endpoint
 - Event listing endpoint
 - Event lookup by ID
 - Automatic incident creation for high-severity events
@@ -29,6 +30,7 @@ This version includes:
 - Incident lookup by ID
 - Incident-to-events lookup endpoint
 - Incident detail endpoint with linked events
+- Incident timeline endpoint
 - Summary statistics endpoint
 - Manual incident status updates
 - Filtering for events and incidents
@@ -49,6 +51,7 @@ It receives security events such as:
 - reverse shell detections
 - credential access attempts
 - simulated port scans
+- Falco-style runtime alerts
 
 Then it applies a basic correlation rule set:
 

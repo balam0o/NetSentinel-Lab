@@ -9,7 +9,9 @@ from app.api.schemas.incidents import (
     IncidentDetailResponse,
     IncidentResponse,
     IncidentStatus,
+    IncidentTimelineResponse,
     IncidentUpdate,
+    TimelineEventResponse,
 )
 from app.db.models import Event, Incident, IncidentEvent
 from app.db.session import get_db
@@ -20,6 +22,17 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 IncidentSortField = Literal["last_seen", "first_seen", "title", "status", "severity"]
 SortOrder = Literal["asc", "desc"]
+
+
+def build_timeline_summary(event: Event) -> str:
+    raw = event.raw_event_json or {}
+
+    for key in ("rule", "output", "message"):
+        value = raw.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+
+    return event.event_type.replace("_", " ")
 
 
 @router.get("", response_model=list[IncidentResponse])
@@ -79,7 +92,7 @@ def get_incident_detail(
         select(Event)
         .join(IncidentEvent, IncidentEvent.event_id == Event.id)
         .where(IncidentEvent.incident_id == incident_id)
-        .order_by(desc(Event.created_at))
+        .order_by(desc(Event.created_at), desc(Event.id))
         .limit(limit)
     )
 
@@ -89,6 +102,51 @@ def get_incident_detail(
         incident=incident,
         events=events,
         event_count=len(events),
+    )
+
+
+@router.get("/{incident_id}/timeline", response_model=IncidentTimelineResponse)
+def get_incident_timeline(
+    incident_id: int,
+    db: DbSession,
+    limit: int = Query(default=100, ge=1, le=500),
+):
+    incident = db.get(Incident, incident_id)
+
+    if incident is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Incident with id={incident_id} was not found",
+        )
+
+    statement = (
+        select(Event)
+        .join(IncidentEvent, IncidentEvent.event_id == Event.id)
+        .where(IncidentEvent.incident_id == incident_id)
+        .order_by(asc(Event.created_at), asc(Event.id))
+        .limit(limit)
+    )
+
+    events = db.execute(statement).scalars().all()
+
+    timeline = [
+        TimelineEventResponse(
+            event_id=event.id,
+            created_at=event.created_at,
+            source=event.source,
+            event_type=event.event_type,
+            severity=event.severity,
+            hostname=event.hostname,
+            container_name=event.container_name,
+            summary=build_timeline_summary(event),
+        )
+        for event in events
+    ]
+
+    return IncidentTimelineResponse(
+        incident=incident,
+        timeline=timeline,
+        event_count=len(timeline),
     )
 
 
@@ -140,7 +198,7 @@ def get_incident_events(
         select(Event)
         .join(IncidentEvent, IncidentEvent.event_id == Event.id)
         .where(IncidentEvent.incident_id == incident_id)
-        .order_by(desc(Event.created_at))
+        .order_by(desc(Event.created_at), desc(Event.id))
         .limit(limit)
     )
 

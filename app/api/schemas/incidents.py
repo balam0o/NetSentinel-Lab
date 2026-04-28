@@ -32,3 +32,20 @@ class IncidentDetailResponse(BaseModel):
     incident: IncidentResponse
     events: list[EventResponse]
     event_count: int
+
+
+class TimelineEventResponse(BaseModel):
+    event_id: int
+    created_at: datetime
+    source: str
+    event_type: str
+    severity: SeverityLevel
+    hostname: str | None
+    container_name: str | None
+    summary: str
+
+
+class IncidentTimelineResponse(BaseModel):
+    incident: IncidentResponse
+    timeline: list[TimelineEventResponse]
+    event_count: int

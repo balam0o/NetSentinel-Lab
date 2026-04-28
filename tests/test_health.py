@@ -820,3 +820,92 @@ def test_falco_warning_maps_to_medium_and_does_not_create_incident(client):
     assert incidents_response.status_code == 200
     incidents = incidents_response.json()
     assert len(incidents) == 0
+
+def test_get_incident_timeline(client):
+    payload_1 = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-timeline",
+        "container_name": "gateway-service",
+        "raw_event_json": {
+            "rule": "Reverse shell detected",
+            "process": "bash",
+        },
+    }
+
+    payload_2 = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-timeline",
+        "container_name": "gateway-service",
+        "raw_event_json": {
+            "rule": "Reverse shell detected",
+            "process": "sh",
+        },
+    }
+
+    response_1 = client.post("/events/ingest", json=payload_1)
+    response_2 = client.post("/events/ingest", json=payload_2)
+
+    assert response_1.status_code == 201
+    assert response_2.status_code == 201
+
+    event_1 = response_1.json()
+    event_2 = response_2.json()
+
+    incidents_response = client.get(
+        "/incidents?title_contains=gateway-service&sort_by=title&sort_order=asc"
+    )
+    assert incidents_response.status_code == 200
+
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+
+    incident_id = incidents[0]["id"]
+
+    timeline_response = client.get(f"/incidents/{incident_id}/timeline")
+    assert timeline_response.status_code == 200
+
+    data = timeline_response.json()
+    assert data["incident"]["id"] == incident_id
+    assert data["event_count"] == 2
+    assert len(data["timeline"]) == 2
+    assert data["timeline"][0]["event_id"] == event_1["id"]
+    assert data["timeline"][1]["event_id"] == event_2["id"]
+    assert data["timeline"][0]["summary"] == "Reverse shell detected"
+
+
+def test_get_incident_timeline_not_found(client):
+    response = client.get("/incidents/999999/timeline")
+    assert response.status_code == 404
+
+
+def test_falco_timeline_summary_uses_output_when_rule_not_present_in_raw(client):
+    payload = {
+        "output": "Unexpected outbound connection from container",
+        "priority": "Error",
+        "rule": "Outbound connection",
+        "output_fields": {
+            "evt.hostname": "node-falco-timeline",
+            "container.name": "network-proxy",
+        },
+    }
+
+    create_response = client.post("/events/ingest/falco", json=payload)
+    assert create_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=network-proxy")
+    assert incidents_response.status_code == 200
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+
+    incident_id = incidents[0]["id"]
+
+    timeline_response = client.get(f"/incidents/{incident_id}/timeline")
+    assert timeline_response.status_code == 200
+
+    data = timeline_response.json()
+    assert data["event_count"] == 1
+    assert data["timeline"][0]["summary"] == "Outbound connection"
