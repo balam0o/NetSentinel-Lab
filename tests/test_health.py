@@ -1,5 +1,5 @@
 from datetime import datetime, timedelta, timezone
-
+import app.services.correlator as correlator
 from app.db.models import Incident
 from app.db.session import SessionLocal
 
@@ -1275,3 +1275,72 @@ def test_old_closed_incident_outside_window_creates_new_incident(client):
     assert len(refreshed_incidents) == 2
     statuses = sorted(incident["status"] for incident in refreshed_incidents)
     assert statuses == ["closed", "open"]
+
+def test_configurable_short_correlation_window_creates_new_incident(client, monkeypatch):
+    monkeypatch.setattr(correlator, "get_correlation_window_hours", lambda: 1)
+
+    payload = {
+        "source": "falco",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-config-window",
+        "container_name": "billing-api",
+        "raw_event_json": {"rule": "Sensitive file opened"},
+    }
+
+    first_response = client.post("/events/ingest", json=payload)
+    assert first_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=billing-api")
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+
+    incident_id = incidents[0]["id"]
+
+    with SessionLocal() as db:
+        incident = db.get(Incident, incident_id)
+        incident.first_seen = datetime.now(timezone.utc) - timedelta(hours=2, minutes=5)
+        incident.last_seen = datetime.now(timezone.utc) - timedelta(hours=2)
+        db.commit()
+
+    second_response = client.post("/events/ingest", json=payload)
+    assert second_response.status_code == 201
+
+    refreshed_response = client.get("/incidents?title_contains=billing-api")
+    refreshed_incidents = refreshed_response.json()
+    assert len(refreshed_incidents) == 2
+
+
+def test_configurable_long_correlation_window_reuses_incident(client, monkeypatch):
+    monkeypatch.setattr(correlator, "get_correlation_window_hours", lambda: 72)
+
+    payload = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-long-window",
+        "container_name": "gateway-api",
+        "raw_event_json": {"rule": "Reverse shell detected"},
+    }
+
+    first_response = client.post("/events/ingest", json=payload)
+    assert first_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=gateway-api")
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+
+    incident_id = incidents[0]["id"]
+
+    with SessionLocal() as db:
+        incident = db.get(Incident, incident_id)
+        incident.first_seen = datetime.now(timezone.utc) - timedelta(hours=48, minutes=5)
+        incident.last_seen = datetime.now(timezone.utc) - timedelta(hours=48)
+        db.commit()
+
+    second_response = client.post("/events/ingest", json=payload)
+    assert second_response.status_code == 201
+
+    refreshed_response = client.get("/incidents?title_contains=gateway-api")
+    refreshed_incidents = refreshed_response.json()
+    assert len(refreshed_incidents) == 1

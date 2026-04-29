@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
@@ -14,19 +15,10 @@ SEVERITY_RANK = {
     "critical": 4,
 }
 
-CORRELATION_WINDOW = timedelta(hours=24)
+DEFAULT_CORRELATION_WINDOW_HOURS = 24
 
 
 def correlate_event(db: Session, event: Event) -> Incident | None:
-    """
-    Correlation rules:
-    - only high/critical events create or update incidents
-    - incidents are matched with a source-aware correlation key
-    - closed incidents are reopened only if the new event is inside the window
-    - severity is escalated if a more severe event arrives
-    - if the last matching incident is outside the window, create a new incident
-    """
-
     if event.severity not in {"high", "critical"}:
         return None
 
@@ -104,10 +96,26 @@ def ensure_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def get_correlation_window_hours() -> int:
+    raw_value = os.getenv("CORRELATION_WINDOW_HOURS", str(DEFAULT_CORRELATION_WINDOW_HOURS))
+
+    try:
+        hours = int(raw_value)
+    except ValueError:
+        return DEFAULT_CORRELATION_WINDOW_HOURS
+
+    return max(1, hours)
+
+
+def get_correlation_window() -> timedelta:
+    return timedelta(hours=get_correlation_window_hours())
+
+
 def is_within_correlation_window(last_seen: datetime, event_created_at: datetime) -> bool:
     last_seen_utc = ensure_utc(last_seen)
     event_created_at_utc = ensure_utc(event_created_at)
-    return (event_created_at_utc - last_seen_utc) <= CORRELATION_WINDOW
+    delta = event_created_at_utc - last_seen_utc
+    return delta <= get_correlation_window()
 
 
 def link_event_to_incident(db: Session, incident: Incident, event: Event) -> None:
