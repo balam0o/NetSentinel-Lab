@@ -31,6 +31,8 @@ This version includes:
 - Incident severity escalation
 - Incident reopening on recurring activity
 - Configurable temporal correlation window
+- Configurable burst-correlation thresholds
+- Configurable attack-chain window
 - Multi-event burst correlation for repeated medium activity
 - Cross-event attack-chain correlation
 - Incident listing endpoint
@@ -43,6 +45,7 @@ This version includes:
 - Manual incident status updates
 - Filtering for events and incidents
 - Pagination and configurable sorting
+- Minimal dashboard UI served by FastAPI
 - Sample event simulation script
 - Automated tests with pytest
 - GitHub Actions CI
@@ -83,6 +86,8 @@ This makes the project useful as a starting point for a future SOC-style lab, in
 - **PostgreSQL**
 - **SQLAlchemy**
 - **Docker Compose**
+- **Vanilla JavaScript**
+- **HTML / CSS**
 - **pytest**
 - **GitHub Actions**
 
@@ -98,7 +103,9 @@ netsentinel-lab/
 │  │  └─ schemas/
 │  ├─ core/
 │  ├─ db/
-│  └─ services/
+│  ├─ services/
+│  └─ static/
+│     └─ dashboard/
 ├─ docker/
 ├─ infra/
 ├─ lab/
@@ -126,6 +133,9 @@ netsentinel-lab/
 - `app/services/`  
   Correlation logic and business rules
 
+- `app/static/dashboard/`  
+  Dashboard HTML, CSS, and JavaScript
+
 - `lab/sample_events/`  
   Example event payloads used for simulation
 
@@ -133,7 +143,7 @@ netsentinel-lab/
   Utility scripts such as event senders
 
 - `tests/`  
-  API and database behavior tests
+  API and dashboard behavior tests
 
 ---
 
@@ -190,7 +200,8 @@ The correlator supports:
 - reopening of a matching closed incident
 - automatic `last_seen` updates
 - a configurable temporal window for incident reuse
-- burst-based creation of incidents from repeated `medium` events
+- configurable burst thresholds and burst windows
+- configurable attack-chain windows
 - sequence-based escalation for suspicious chains of different event types
 
 ### 5. Investigation workflow
@@ -206,9 +217,18 @@ The API supports querying:
 - a chronological incident timeline
 - an enriched incident summary
 
-### 6. Event simulation
+### 6. Minimal dashboard UI
 
-The project includes sample Falco-style and simulated events plus a script to send them into the API automatically.
+The application includes a lightweight dashboard served directly by FastAPI.
+
+It provides:
+
+- summary cards
+- incident table
+- status and severity filters
+- text search for titles
+- incident detail view
+- incident timeline view
 
 ### 7. Summary statistics
 
@@ -326,6 +346,11 @@ The API exposes an enrichment endpoint that summarizes an incident with:
 - `GET /incidents/{id}/enrichment`
 - `PATCH /incidents/{id}`
 
+### Dashboard
+
+- `GET /dashboard`
+- `GET /dashboard-assets/...`
+
 ### Stats
 
 - `GET /stats/summary`
@@ -340,11 +365,10 @@ The API exposes an enrichment endpoint that summarizes an incident with:
 4. Query generated incidents
 5. Inspect which events belong to each incident
 6. Retrieve summary statistics from the lab
-7. Manually close incidents when needed
-8. Filter, paginate, and sort results during investigation
-9. Retrieve full incident detail with linked events
-10. Reconstruct the incident sequence using the timeline endpoint
-11. Inspect summarized context with the enrichment endpoint
+7. Open the dashboard
+8. Filter incidents by status, severity, and title
+9. Open incident detail and timeline
+10. Manually close incidents when needed
 
 ---
 
@@ -385,19 +409,20 @@ APP_NAME=NetSentinel Lab API
 APP_ENV=development
 DATABASE_URL=postgresql+psycopg://netsentinel:netsentinel@localhost:5432/netsentinel
 CORRELATION_WINDOW_HOURS=24
+MEDIUM_BURST_THRESHOLD=3
+MEDIUM_BURST_WINDOW_MINUTES=15
+ATTACK_CHAIN_WINDOW_MINUTES=10
 ```
 
-### Correlation window setting
+### Configurable correlation settings
 
 `CORRELATION_WINDOW_HOURS` controls how long a matching incident remains eligible for reuse.
 
-Examples:
+`MEDIUM_BURST_THRESHOLD` controls how many repeated `medium` events are required to create a burst incident.
 
-- `24` → reuse incidents active within the last 24 hours
-- `1` → only reuse incidents active within the last hour
-- `72` → reuse incidents active within the last 3 days
+`MEDIUM_BURST_WINDOW_MINUTES` controls the time window for that burst rule.
 
-If a matching incident is older than the configured window, a new incident is created.
+`ATTACK_CHAIN_WINDOW_MINUTES` controls how far back the correlator looks for precursor events like `port_scan_detected`.
 
 ---
 
@@ -437,6 +462,7 @@ Once the stack is running:
 - API root: `http://localhost:8000/`
 - Swagger docs: `http://localhost:8000/docs`
 - Health check: `http://localhost:8000/health`
+- Dashboard: `http://localhost:8000/dashboard`
 
 ---
 
@@ -492,6 +518,8 @@ The test suite covers:
 - incident reopening after closure
 - source-aware incident separation
 - configurable temporal correlation windows
+- configurable medium-burst thresholds
+- configurable attack-chain windows
 - multi-event burst correlation for medium events
 - cross-event attack-chain correlation
 - incident lookup by ID
@@ -504,6 +532,28 @@ The test suite covers:
 - filtering for events
 - filtering for incidents
 - pagination and sorting
+- dashboard page availability
+- dashboard static assets
+
+---
+
+## Dashboard usage
+
+Open:
+
+```text
+http://localhost:8000/dashboard
+```
+
+The dashboard shows:
+
+- summary cards at the top
+- a filter bar
+- a list of incidents
+- a detail panel for the selected incident
+- a timeline panel for linked events
+
+It uses the same backend API endpoints already exposed by the service.
 
 ---
 
@@ -526,45 +576,6 @@ curl -X POST "http://localhost:8000/events/ingest"   -H "Content-Type: applicati
 
 ---
 
-## Falco ingestion example
-
-```bash
-curl -X POST "http://localhost:8000/events/ingest/falco"   -H "Content-Type: application/json"   -d '{
-    "output": "A shell was spawned in a container",
-    "priority": "Error",
-    "rule": "Terminal shell in container",
-    "output_fields": {
-      "evt.hostname": "node-falco",
-      "container.name": "payments-api",
-      "proc.name": "bash"
-    }
-  }'
-```
-
----
-
-## Suricata ingestion example
-
-```bash
-curl -X POST "http://localhost:8000/events/ingest/suricata"   -H "Content-Type: application/json"   -d '{
-    "timestamp": "2026-04-27T10:48:58.801038Z",
-    "event_type": "alert",
-    "src_ip": "10.10.0.5",
-    "src_port": 51514,
-    "dest_ip": "10.10.0.10",
-    "dest_port": 443,
-    "proto": "TCP",
-    "app_proto": "tls",
-    "host": "edge-firewall",
-    "alert": {
-      "signature": "ET MALWARE CnC Beacon Activity",
-      "severity": 2
-    }
-  }'
-```
-
----
-
 ## Correlation rules
 
 Current rules now include:
@@ -573,6 +584,8 @@ Current rules now include:
 - incident severity escalation
 - incident reopening on recurring activity
 - configurable temporal correlation windows
+- configurable medium-burst thresholds
+- configurable attack-chain windows
 - medium-event burst promotion
 - attack-chain correlation across event types
 
@@ -582,56 +595,29 @@ An event creates or updates an incident if:
 
 - severity is `high` or `critical`
 
-### Correlation key
-
-The correlator uses a source-aware matching key so events from different telemetry systems are not merged by mistake.
-
-### Severity escalation
-
-If a matching incident already exists and a more severe event arrives later, the incident severity is raised.
-
-### Reopening behavior
-
-If a matching incident was previously closed and a new relevant event arrives inside the window, the incident is reopened automatically.
-
-### Temporal window
-
-A matching incident is only reused if its `last_seen` is recent enough.
-
-The window is controlled by:
-
-- `CORRELATION_WINDOW_HOURS`
-
-Default:
-
-- `24`
-
-If the last matching activity is older than the configured window, a new incident is created.
-
 ### Medium burst promotion
 
 Repeated medium events can also create incidents.
 
-Default rule:
+Controlled by:
 
-- **3 medium events**
-- with the **same source-aware pattern**
-- within **15 minutes**
-
-When that happens, the system creates a **high** incident and links the related medium events to it.
+- `MEDIUM_BURST_THRESHOLD`
+- `MEDIUM_BURST_WINDOW_MINUTES`
 
 ### Attack-chain correlation
 
 The correlator also watches for suspicious event sequences.
 
-Current rule:
+Controlled by:
+
+- `ATTACK_CHAIN_WINDOW_MINUTES`
+
+Current sequence rule:
 
 - `port_scan_detected`
 - followed by `credential_access` or `reverse_shell_detected`
 - with the same source, host, and container
-- within **10 minutes**
-
-When that happens, the incident severity is elevated to **critical**, and the precursor event is linked to the same incident.
+- within the configured attack-chain window
 
 ### Incident exclusions
 
@@ -716,16 +702,13 @@ This project can be extended toward:
 
 Planned improvements:
 
-- configurable medium-burst thresholds
-- configurable attack-chain rules
+- configurable attack-chain mappings
 - richer multi-event correlation rules
-- normalized adapters for additional network telemetry formats
-- attack simulation scenarios
-- better incident detail enrichment
-- Kubernetes deployment with kind or minikube
+- dashboard actions for incident closing
 - authentication and role-based access
-- severity scoring improvements
-- dashboard integration
+- better incident detail enrichment
+- dashboard charts
+- Kubernetes deployment with kind or minikube
 
 ---
 
@@ -736,7 +719,7 @@ This is an early lab implementation, so there are important limitations:
 - correlation logic is still intentionally simple
 - there is no authentication yet
 - there are no database migrations yet
-- there is no frontend dashboard yet
+- the dashboard is intentionally minimal
 - events are ingested manually or from sample scripts
 
 
@@ -760,9 +743,10 @@ This project is structured to grow in layers:
 12. chronological incident reconstruction
 13. improved correlation behavior
 14. configurable temporal windows
-15. multi-event burst correlation
+15. configurable rule thresholds
 16. attack-chain correlation
-17. future integrations and orchestration
+17. dashboard visualization
+18. future integrations and orchestration
 
 The focus is not to add unnecessary complexity too early.
 

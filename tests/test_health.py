@@ -4,6 +4,7 @@ from app.db.models import Incident
 from app.db.session import SessionLocal
 from app.db.models import Event, Incident
 
+
 def test_root(client):
     response = client.get("/")
     assert response.status_code == 200
@@ -1693,3 +1694,21 @@ def test_configurable_attack_chain_window_allows_older_precursor(client, monkeyp
 
     assert len(incidents) == 1
     assert incidents[0]["severity"] == "critical"
+
+def test_dashboard_page_is_served(client):
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "NetSentinel Dashboard" in response.text
+
+
+def test_dashboard_css_is_served(client):
+    response = client.get("/dashboard-assets/dashboard.css")
+    assert response.status_code == 200
+    assert "body" in response.text
+
+
+def test_dashboard_js_is_served(client):
+    response = client.get("/dashboard-assets/dashboard.js")
+    assert response.status_code == 200
+    assert "refreshDashboard" in response.text

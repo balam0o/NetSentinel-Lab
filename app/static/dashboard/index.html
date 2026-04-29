@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>NetSentinel Dashboard</title>
+  <link rel="stylesheet" href="/dashboard-assets/dashboard.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <div>
+        <h1>NetSentinel Dashboard</h1>
+        <p>Minimal investigation dashboard for incidents, timelines, and summary metrics.</p>
+      </div>
+      <button id="refreshButton">Refresh</button>
+    </header>
+
+    <section class="stats-grid">
+      <article class="stat-card">
+        <span class="stat-label">Total Events</span>
+        <strong id="totalEvents">-</strong>
+      </article>
+      <article class="stat-card">
+        <span class="stat-label">Total Incidents</span>
+        <strong id="totalIncidents">-</strong>
+      </article>
+      <article class="stat-card">
+        <span class="stat-label">Open Incidents</span>
+        <strong id="openIncidents">-</strong>
+      </article>
+      <article class="stat-card">
+        <span class="stat-label">Top Severity</span>
+        <strong id="topSeverity">-</strong>
+      </article>
+    </section>
+
+    <section class="filters">
+      <div class="filter-group">
+        <label for="statusFilter">Status</label>
+        <select id="statusFilter">
+          <option value="">All</option>
+          <option value="open">Open</option>
+          <option value="closed">Closed</option>
+        </select>
+      </div>
+
+      <div class="filter-group">
+        <label for="severityFilter">Severity</label>
+        <select id="severityFilter">
+          <option value="">All</option>
+          <option value="critical">Critical</option>
+          <option value="high">High</option>
+          <option value="medium">Medium</option>
+          <option value="low">Low</option>
+        </select>
+      </div>
+
+      <div class="filter-group grow">
+        <label for="titleFilter">Title contains</label>
+        <input id="titleFilter" type="text" placeholder="Search incident title" />
+      </div>
+
+      <button id="applyFiltersButton">Apply filters</button>
+    </section>
+
+    <section class="main-grid">
+      <article class="panel">
+        <div class="panel-header">
+          <h2>Incidents</h2>
+          <span id="incidentCount">0 results</span>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th>Severity</th>
+                <th>Status</th>
+                <th>Last Seen</th>
+              </tr>
+            </thead>
+            <tbody id="incidentTableBody">
+              <tr>
+                <td colspan="4" class="empty-state">Loading incidents...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <aside class="side-column">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Incident Detail</h2>
+          </div>
+          <div id="incidentDetail" class="detail-content">
+            Select an incident to inspect details.
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Timeline</h2>
+          </div>
+          <div id="incidentTimeline" class="timeline-content">
+            Timeline will appear here after selecting an incident.
+          </div>
+        </article>
+      </aside>
+    </section>
+  </div>
+
+  <script src="/dashboard-assets/dashboard.js"></script>
+</body>
+</html>

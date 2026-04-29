@@ -9,6 +9,10 @@ from app.api.routes.stats import router as stats_router
 from app.core.config import settings
 from app.db.models import Base
 from app.db.session import engine
+from pathlib import Path
+
+from fastapi.staticfiles import StaticFiles
+from app.api.routes.dashboard import router as dashboard_router
 
 
 @asynccontextmanager
@@ -37,3 +41,11 @@ app.include_router(health_router)
 app.include_router(events_router)
 app.include_router(incidents_router)
 app.include_router(stats_router)
+app.include_router(dashboard_router)
+
+BASE_DIR = Path(__file__).resolve().parents[1]
+app.mount(
+    "/dashboard-assets",
+    StaticFiles(directory=BASE_DIR / "static" / "dashboard"),
+    name="dashboard-assets",
+)
