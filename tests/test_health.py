@@ -2,6 +2,7 @@ from datetime import datetime, timedelta, timezone
 import app.services.correlator as correlator
 from app.db.models import Incident
 from app.db.session import SessionLocal
+from app.db.models import Event, Incident
 
 def test_root(client):
     response = client.get("/")
@@ -1456,3 +1457,139 @@ def test_additional_medium_event_is_attached_to_existing_burst_incident(client):
     assert events_response.status_code == 200
     events = events_response.json()
     assert len(events) == 4
+
+def test_port_scan_followed_by_credential_access_creates_critical_chain_incident(client):
+    port_scan_payload = {
+        "source": "simulator",
+        "event_type": "port_scan_detected",
+        "severity": "medium",
+        "hostname": "node-chain",
+        "container_name": "attack-box",
+        "raw_event_json": {"ports": [21, 22, 80]},
+    }
+
+    credential_payload = {
+        "source": "simulator",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-chain",
+        "container_name": "attack-box",
+        "raw_event_json": {"file": "/etc/shadow"},
+    }
+
+    first_response = client.post("/events/ingest", json=port_scan_payload)
+    second_response = client.post("/events/ingest", json=credential_payload)
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=attack-box")
+    assert incidents_response.status_code == 200
+
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+    assert incidents[0]["title"] == "credential_access on node-chain/attack-box"
+    assert incidents[0]["severity"] == "critical"
+
+    incident_id = incidents[0]["id"]
+
+    linked_events_response = client.get(f"/incidents/{incident_id}/events")
+    assert linked_events_response.status_code == 200
+    linked_events = linked_events_response.json()
+
+    assert len(linked_events) == 2
+    assert {event["event_type"] for event in linked_events} == {
+        "port_scan_detected",
+        "credential_access",
+    }
+
+
+def test_attack_chain_outside_window_does_not_escalate_incident(client):
+    port_scan_payload = {
+        "source": "simulator",
+        "event_type": "port_scan_detected",
+        "severity": "medium",
+        "hostname": "node-chain-old",
+        "container_name": "attack-box",
+        "raw_event_json": {"ports": [21, 22, 80]},
+    }
+
+    credential_payload = {
+        "source": "simulator",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-chain-old",
+        "container_name": "attack-box",
+        "raw_event_json": {"file": "/etc/shadow"},
+    }
+
+    first_response = client.post("/events/ingest", json=port_scan_payload)
+    assert first_response.status_code == 201
+
+    port_scan_event_id = first_response.json()["id"]
+
+    with SessionLocal() as db:
+        event = db.get(Event, port_scan_event_id)
+        event.created_at = datetime.now(timezone.utc) - timedelta(minutes=20)
+        db.commit()
+
+    second_response = client.post("/events/ingest", json=credential_payload)
+    assert second_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=attack-box")
+    assert incidents_response.status_code == 200
+    incidents = incidents_response.json()
+
+    assert len(incidents) == 1
+    assert incidents[0]["severity"] == "high"
+
+    incident_id = incidents[0]["id"]
+
+    linked_events_response = client.get(f"/incidents/{incident_id}/events")
+    assert linked_events_response.status_code == 200
+    linked_events = linked_events_response.json()
+
+    assert len(linked_events) == 1
+    assert linked_events[0]["event_type"] == "credential_access"
+
+
+def test_attack_chain_is_source_aware(client):
+    port_scan_payload = {
+        "source": "simulator",
+        "event_type": "port_scan_detected",
+        "severity": "medium",
+        "hostname": "node-chain-source",
+        "container_name": "attack-box",
+        "raw_event_json": {"ports": [21, 22, 80]},
+    }
+
+    credential_payload = {
+        "source": "falco",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-chain-source",
+        "container_name": "attack-box",
+        "raw_event_json": {"file": "/etc/shadow"},
+    }
+
+    first_response = client.post("/events/ingest", json=port_scan_payload)
+    second_response = client.post("/events/ingest", json=credential_payload)
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=attack-box")
+    assert incidents_response.status_code == 200
+    incidents = incidents_response.json()
+
+    assert len(incidents) == 1
+    assert incidents[0]["severity"] == "high"
+
+    incident_id = incidents[0]["id"]
+
+    linked_events_response = client.get(f"/incidents/{incident_id}/events")
+    assert linked_events_response.status_code == 200
+    linked_events = linked_events_response.json()
+
+    assert len(linked_events) == 1
+    assert linked_events[0]["event_type"] == "credential_access"

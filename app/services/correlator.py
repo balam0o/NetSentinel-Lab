@@ -18,6 +18,7 @@ SEVERITY_RANK = {
 DEFAULT_CORRELATION_WINDOW_HOURS = 24
 DEFAULT_MEDIUM_BURST_THRESHOLD = 3
 DEFAULT_MEDIUM_BURST_WINDOW_MINUTES = 15
+DEFAULT_ATTACK_CHAIN_WINDOW_MINUTES = 10
 
 
 def correlate_event(db: Session, event: Event) -> Incident | None:
@@ -33,6 +34,13 @@ def correlate_event(db: Session, event: Event) -> Incident | None:
 def correlate_high_or_critical_event(db: Session, event: Event) -> Incident | None:
     correlation_key = build_correlation_key(event)
     existing_incident = get_latest_matching_incident(db, correlation_key)
+    chain_precursors = get_recent_chain_precursor_events(db, event)
+    target_severity = derive_attack_chain_severity(event, chain_precursors)
+    target_description = (
+        build_attack_chain_incident_description(event, chain_precursors)
+        if chain_precursors
+        else build_incident_description(event)
+    )
 
     if existing_incident is not None:
         if is_within_correlation_window(existing_incident.last_seen, event.created_at):
@@ -41,8 +49,14 @@ def correlate_high_or_critical_event(db: Session, event: Event) -> Incident | No
             if existing_incident.status == "closed":
                 existing_incident.status = "open"
 
-            if severity_rank(event.severity) > severity_rank(existing_incident.severity):
-                existing_incident.severity = event.severity
+            if severity_rank(target_severity) > severity_rank(existing_incident.severity):
+                existing_incident.severity = target_severity
+
+            if chain_precursors:
+                existing_incident.description = target_description
+
+            for precursor in chain_precursors:
+                link_event_to_incident(db, existing_incident, precursor)
 
             link_event_to_incident(db, existing_incident, event)
             db.commit()
@@ -52,10 +66,15 @@ def correlate_high_or_critical_event(db: Session, event: Event) -> Incident | No
     incident = create_incident(
         db=db,
         event=event,
-        severity=event.severity,
-        description=build_incident_description(event),
+        severity=target_severity,
+        description=target_description,
     )
+
+    for precursor in chain_precursors:
+        link_event_to_incident(db, incident, precursor)
+
     link_event_to_incident(db, incident, event)
+
     db.commit()
     db.refresh(incident)
     return incident
@@ -147,6 +166,14 @@ def build_medium_burst_incident_description(event: Event, count: int) -> str:
     )
 
 
+def build_attack_chain_incident_description(event: Event, precursors: list[Event]) -> str:
+    precursor_types = ", ".join(sorted({precursor.event_type for precursor in precursors}))
+    return (
+        f"Incident elevated by attack-chain correlation: {precursor_types} "
+        f"preceded '{event.event_type}' within {get_attack_chain_window_minutes()} minutes."
+    )
+
+
 def build_correlation_key(event: Event) -> str:
     host = event.hostname or "-"
     container = event.container_name or "-"
@@ -190,6 +217,14 @@ def get_medium_burst_window() -> timedelta:
     return timedelta(minutes=get_medium_burst_window_minutes())
 
 
+def get_attack_chain_window_minutes() -> int:
+    return DEFAULT_ATTACK_CHAIN_WINDOW_MINUTES
+
+
+def get_attack_chain_window() -> timedelta:
+    return timedelta(minutes=get_attack_chain_window_minutes())
+
+
 def is_within_correlation_window(last_seen: datetime, event_created_at: datetime) -> bool:
     last_seen_utc = ensure_utc(last_seen)
     event_created_at_utc = ensure_utc(event_created_at)
@@ -228,6 +263,58 @@ def qualifies_for_medium_burst(events: list[Event]) -> bool:
     last_event_time = ensure_utc(events[-1].created_at)
 
     return (last_event_time - first_event_time) <= get_medium_burst_window()
+
+
+def get_attack_chain_precursor_types(event: Event) -> list[str]:
+    if event.event_type == "credential_access":
+        return ["port_scan_detected"]
+
+    if event.event_type == "reverse_shell_detected":
+        return ["port_scan_detected", "credential_access"]
+
+    return []
+
+
+def get_recent_chain_precursor_events(db: Session, event: Event) -> list[Event]:
+    precursor_types = get_attack_chain_precursor_types(event)
+
+    if not precursor_types:
+        return []
+
+    event_created_at_utc = ensure_utc(event.created_at)
+    window = get_attack_chain_window()
+
+    statement = (
+        select(Event)
+        .where(
+            Event.id != event.id,
+            Event.source == event.source,
+            Event.event_type.in_(precursor_types),
+            nullable_match(Event.hostname, event.hostname),
+            nullable_match(Event.container_name, event.container_name),
+        )
+        .order_by(Event.created_at.desc(), Event.id.desc())
+        .limit(20)
+    )
+
+    candidates = db.execute(statement).scalars().all()
+    candidates.reverse()
+
+    matched = []
+    for candidate in candidates:
+        candidate_created_at_utc = ensure_utc(candidate.created_at)
+        delta = event_created_at_utc - candidate_created_at_utc
+
+        if timedelta(0) <= delta <= window:
+            matched.append(candidate)
+
+    return matched
+
+
+def derive_attack_chain_severity(event: Event, precursors: list[Event]) -> str:
+    if precursors:
+        return "critical"
+    return event.severity
 
 
 def nullable_match(column, value):
