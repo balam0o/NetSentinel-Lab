@@ -39,6 +39,7 @@ class Incident(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     severity: Mapped[str] = mapped_column(String(20), nullable=False, default="medium")
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="open")
+    correlation_key: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
     first_seen: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),

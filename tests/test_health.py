@@ -1,3 +1,8 @@
+from datetime import datetime, timedelta, timezone
+
+from app.db.models import Incident
+from app.db.session import SessionLocal
+
 def test_root(client):
     response = client.get("/")
     assert response.status_code == 200
@@ -1010,7 +1015,7 @@ def test_get_incident_enrichment(client):
             },
         },
         {
-            "source": "suricata",
+            "source": "falco",
             "event_type": "reverse_shell_detected",
             "severity": "high",
             "hostname": "node-enrich",
@@ -1038,18 +1043,16 @@ def test_get_incident_enrichment(client):
     data = enrichment_response.json()
     assert data["incident"]["id"] == incident_id
     assert data["event_count"] == 2
-    assert data["sources_seen"] == ["falco", "suricata"]
+    assert data["sources_seen"] == ["falco"]
     assert data["hosts_seen"] == ["node-enrich"]
     assert data["containers_seen"] == ["gateway-service"]
     assert data["event_types_seen"] == ["reverse_shell_detected"]
-    assert data["counts_by_source"]["falco"] == 1
-    assert data["counts_by_source"]["suricata"] == 1
+    assert data["counts_by_source"]["falco"] == 2
     assert data["counts_by_severity"]["critical"] == 1
     assert data["counts_by_severity"]["high"] == 1
     assert data["counts_by_event_type"]["reverse_shell_detected"] == 2
     assert data["first_activity"] is not None
     assert data["last_activity"] is not None
-
 
 def test_get_incident_enrichment_not_found(client):
     response = client.get("/incidents/999999/enrichment")
@@ -1094,3 +1097,181 @@ def test_enrichment_sorted_unique_values(client):
     data = enrichment_response.json()
     assert data["hosts_seen"] == ["node-a"]
     assert data["containers_seen"] == ["service-a"]
+
+def test_incident_severity_escalates_when_more_severe_event_arrives(client):
+    first_payload = {
+        "source": "falco",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-escalate",
+        "container_name": "billing-api",
+        "raw_event_json": {"rule": "Sensitive file opened"},
+    }
+
+    second_payload = {
+        "source": "falco",
+        "event_type": "credential_access",
+        "severity": "critical",
+        "hostname": "node-escalate",
+        "container_name": "billing-api",
+        "raw_event_json": {"rule": "Sensitive file opened again"},
+    }
+
+    first_response = client.post("/events/ingest", json=first_payload)
+    second_response = client.post("/events/ingest", json=second_payload)
+
+    assert first_response.status_code == 201
+    assert second_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=billing-api")
+    assert incidents_response.status_code == 200
+
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+    assert incidents[0]["severity"] == "critical"
+
+
+def test_closed_incident_reopens_on_new_matching_event(client):
+    payload = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-reopen",
+        "container_name": "gateway-api",
+        "raw_event_json": {"rule": "Reverse shell detected"},
+    }
+
+    first_response = client.post("/events/ingest", json=payload)
+    assert first_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=gateway-api")
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+
+    incident_id = incidents[0]["id"]
+
+    close_response = client.patch(
+        f"/incidents/{incident_id}",
+        json={"status": "closed"},
+    )
+    assert close_response.status_code == 200
+    assert close_response.json()["status"] == "closed"
+
+    second_response = client.post("/events/ingest", json=payload)
+    assert second_response.status_code == 201
+
+    refreshed_response = client.get(f"/incidents/{incident_id}")
+    assert refreshed_response.status_code == 200
+    assert refreshed_response.json()["status"] == "open"
+
+
+def test_same_pattern_from_different_sources_creates_separate_incidents(client):
+    falco_payload = {
+        "source": "falco",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-split",
+        "container_name": "payments-api",
+        "raw_event_json": {"rule": "Sensitive file opened"},
+    }
+
+    suricata_payload = {
+        "source": "suricata",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-split",
+        "container_name": "payments-api",
+        "raw_event_json": {"message": "Sensitive network activity"},
+    }
+
+    falco_response = client.post("/events/ingest", json=falco_payload)
+    suricata_response = client.post("/events/ingest", json=suricata_payload)
+
+    assert falco_response.status_code == 201
+    assert suricata_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=payments-api")
+    assert incidents_response.status_code == 200
+
+    incidents = incidents_response.json()
+    assert len(incidents) == 2
+
+def test_matching_event_outside_correlation_window_creates_new_incident(client):
+    payload = {
+        "source": "falco",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-window",
+        "container_name": "billing-api",
+        "raw_event_json": {"rule": "Sensitive file opened"},
+    }
+
+    first_response = client.post("/events/ingest", json=payload)
+    assert first_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=billing-api")
+    assert incidents_response.status_code == 200
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+
+    original_incident_id = incidents[0]["id"]
+
+    with SessionLocal() as db:
+        incident = db.get(Incident, original_incident_id)
+        incident.first_seen = datetime.now(timezone.utc) - timedelta(days=2, minutes=5)
+        incident.last_seen = datetime.now(timezone.utc) - timedelta(days=2)
+        db.commit()
+
+    second_response = client.post("/events/ingest", json=payload)
+    assert second_response.status_code == 201
+
+    refreshed_response = client.get("/incidents?title_contains=billing-api")
+    assert refreshed_response.status_code == 200
+    refreshed_incidents = refreshed_response.json()
+
+    assert len(refreshed_incidents) == 2
+    ids = {incident["id"] for incident in refreshed_incidents}
+    assert original_incident_id in ids
+
+
+def test_old_closed_incident_outside_window_creates_new_incident(client):
+    payload = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-old-window",
+        "container_name": "gateway-api",
+        "raw_event_json": {"rule": "Reverse shell detected"},
+    }
+
+    create_response = client.post("/events/ingest", json=payload)
+    assert create_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=gateway-api")
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+
+    original_incident_id = incidents[0]["id"]
+
+    close_response = client.patch(
+        f"/incidents/{original_incident_id}",
+        json={"status": "closed"},
+    )
+    assert close_response.status_code == 200
+
+    with SessionLocal() as db:
+        incident = db.get(Incident, original_incident_id)
+        incident.first_seen = datetime.now(timezone.utc) - timedelta(days=3, minutes=5)
+        incident.last_seen = datetime.now(timezone.utc) - timedelta(days=3)
+        db.commit()
+
+    second_response = client.post("/events/ingest", json=payload)
+    assert second_response.status_code == 201
+
+    refreshed_response = client.get("/incidents?title_contains=gateway-api")
+    assert refreshed_response.status_code == 200
+    refreshed_incidents = refreshed_response.json()
+
+    assert len(refreshed_incidents) == 2
+    statuses = sorted(incident["status"] for incident in refreshed_incidents)
+    assert statuses == ["closed", "open"]

@@ -1,45 +1,66 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import Event, Incident, IncidentEvent
 
+SEVERITY_RANK = {
+    "low": 1,
+    "medium": 2,
+    "high": 3,
+    "critical": 4,
+}
+
+CORRELATION_WINDOW = timedelta(hours=24)
+
 
 def correlate_event(db: Session, event: Event) -> Incident | None:
     """
-    Simple correlation rules for phase 3.
-
-    Rules:
-    - high/critical severity events create or update an open incident
-      grouped by event_type + hostname + container_name
-    - medium/low events do not create incidents yet
+    Correlation rules:
+    - only high/critical events create or update incidents
+    - incidents are matched with a source-aware correlation key
+    - closed incidents are reopened only if the new event is inside the window
+    - severity is escalated if a more severe event arrives
+    - if the last matching incident is outside the window, create a new incident
     """
 
     if event.severity not in {"high", "critical"}:
         return None
 
+    correlation_key = build_correlation_key(event)
+
     statement = (
         select(Incident)
-        .where(Incident.status == "open")
-        .where(Incident.title == build_incident_title(event))
-        .order_by(Incident.last_seen.desc())
+        .where(Incident.correlation_key == correlation_key)
+        .order_by(Incident.last_seen.desc(), Incident.id.desc())
     )
 
     existing_incident = db.execute(statement).scalars().first()
 
-    if existing_incident:
-        existing_incident.last_seen = event.created_at
-        link_event_to_incident(db, existing_incident, event)
-        db.commit()
-        db.refresh(existing_incident)
-        return existing_incident
+    if existing_incident is not None:
+        if is_within_correlation_window(existing_incident.last_seen, event.created_at):
+            existing_incident.last_seen = event.created_at
+
+            if existing_incident.status == "closed":
+                existing_incident.status = "open"
+
+            if severity_rank(event.severity) > severity_rank(existing_incident.severity):
+                existing_incident.severity = event.severity
+
+            link_event_to_incident(db, existing_incident, event)
+            db.commit()
+            db.refresh(existing_incident)
+            return existing_incident
 
     incident = Incident(
         title=build_incident_title(event),
         description=build_incident_description(event),
         severity=event.severity,
         status="open",
+        correlation_key=correlation_key,
         first_seen=event.created_at,
         last_seen=event.created_at,
     )
@@ -65,6 +86,28 @@ def build_incident_description(event: Event) -> str:
         f"Incident created from {event.source} event '{event.event_type}' "
         f"with severity '{event.severity}'."
     )
+
+
+def build_correlation_key(event: Event) -> str:
+    host = event.hostname or "-"
+    container = event.container_name or "-"
+    return f"{event.source}:{event.event_type}:{host}:{container}"
+
+
+def severity_rank(value: str) -> int:
+    return SEVERITY_RANK.get(value, 0)
+
+
+def ensure_utc(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def is_within_correlation_window(last_seen: datetime, event_created_at: datetime) -> bool:
+    last_seen_utc = ensure_utc(last_seen)
+    event_created_at_utc = ensure_utc(event_created_at)
+    return (event_created_at_utc - last_seen_utc) <= CORRELATION_WINDOW
 
 
 def link_event_to_incident(db: Session, incident: Incident, event: Event) -> None:
