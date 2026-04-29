@@ -27,11 +27,18 @@ This version includes:
 - Event listing endpoint
 - Event lookup by ID
 - Automatic incident creation for high-severity events
+- Source-aware incident correlation
+- Incident severity escalation
+- Incident reopening on recurring activity
+- Configurable temporal correlation window
+- Multi-event burst correlation for repeated medium activity
+- Cross-event attack-chain correlation
 - Incident listing endpoint
 - Incident lookup by ID
 - Incident-to-events lookup endpoint
 - Incident detail endpoint with linked events
 - Incident timeline endpoint
+- Incident enrichment endpoint
 - Summary statistics endpoint
 - Manual incident status updates
 - Filtering for events and incidents
@@ -55,10 +62,15 @@ It receives security events such as:
 - Falco-style runtime alerts
 - Suricata-style network alerts
 
-Then it applies a basic correlation rule set:
+Then it applies correlation rules that can:
 
-- `high` and `critical` events create or update incidents
-- `low` and `medium` events are stored but do not create incidents yet
+- create incidents for `high` and `critical` events
+- keep different telemetry sources separated during correlation
+- escalate incident severity if a more severe event arrives later
+- reopen a previously closed incident when matching activity appears again
+- create a new incident if matching activity is outside the configured correlation window
+- promote repeated `medium` events into a `high` incident when they happen as a burst
+- elevate incidents to `critical` when a suspicious sequence of different event types is detected
 
 This makes the project useful as a starting point for a future SOC-style lab, incident analysis service, or cloud-native security platform.
 
@@ -155,8 +167,6 @@ This endpoint normalizes:
 - `priority` into internal `severity`
 - Falco `output_fields` into `hostname` and `container_name`
 
-This makes the project more realistic because it can ingest a format closer to a real runtime security tool.
-
 ### 3. Suricata-compatible ingestion
 
 The API also accepts Suricata-style payloads through:
@@ -170,21 +180,18 @@ This endpoint normalizes:
 - host and network context into the existing normalized event fields
 - the original payload into `raw_event_json`
 
-This makes the project more relevant to network security workflows, not only runtime security.
+### 4. Advanced incident correlation
 
-### 4. Incident correlation
+The correlator supports:
 
-A simple rule-based correlator automatically evaluates new events.
-
-Current correlation logic:
-
-- `high` and `critical` severity events create or update incidents
-- incidents are grouped by:
-  - `event_type`
-  - `hostname`
-  - `container_name`
-
-This means repeated high-severity events affecting the same normalized target are grouped under the same open incident.
+- creation of incidents for `high` and `critical` events
+- source-aware matching
+- severity escalation when a stronger event appears
+- reopening of a matching closed incident
+- automatic `last_seen` updates
+- a configurable temporal window for incident reuse
+- burst-based creation of incidents from repeated `medium` events
+- sequence-based escalation for suspicious chains of different event types
 
 ### 5. Investigation workflow
 
@@ -197,6 +204,7 @@ The API supports querying:
 - all events associated with a given incident
 - a detailed incident view with linked events
 - a chronological incident timeline
+- an enriched incident summary
 
 ### 6. Event simulation
 
@@ -222,8 +230,6 @@ Current supported states:
 
 - `open`
 - `closed`
-
-This makes the project more realistic by supporting basic incident lifecycle management instead of only automatic creation.
 
 ### 9. Filtering support
 
@@ -269,8 +275,6 @@ The API exposes a detailed incident endpoint that returns:
 - related events
 - total linked event count
 
-This is useful for investigation workflows because it provides context in a single response instead of forcing clients to call multiple endpoints separately.
-
 ### 12. Incident timeline view
 
 The API exposes a chronological incident timeline endpoint that returns:
@@ -280,7 +284,20 @@ The API exposes a chronological incident timeline endpoint that returns:
 - a compact summary for each event
 - total linked event count
 
-This is useful when reconstructing how an incident evolved over time.
+### 13. Incident enrichment view
+
+The API exposes an enrichment endpoint that summarizes an incident with:
+
+- sources seen
+- severities seen
+- hosts seen
+- containers seen
+- event types seen
+- first activity time
+- last activity time
+- counts by source
+- counts by severity
+- counts by event type
 
 ---
 
@@ -306,6 +323,7 @@ This is useful when reconstructing how an incident evolved over time.
 - `GET /incidents/{id}/events`
 - `GET /incidents/{id}/detail`
 - `GET /incidents/{id}/timeline`
+- `GET /incidents/{id}/enrichment`
 - `PATCH /incidents/{id}`
 
 ### Stats
@@ -326,6 +344,7 @@ This is useful when reconstructing how an incident evolved over time.
 8. Filter, paginate, and sort results during investigation
 9. Retrieve full incident detail with linked events
 10. Reconstruct the incident sequence using the timeline endpoint
+11. Inspect summarized context with the enrichment endpoint
 
 ---
 
@@ -365,7 +384,20 @@ Example `.env`:
 APP_NAME=NetSentinel Lab API
 APP_ENV=development
 DATABASE_URL=postgresql+psycopg://netsentinel:netsentinel@localhost:5432/netsentinel
+CORRELATION_WINDOW_HOURS=24
 ```
+
+### Correlation window setting
+
+`CORRELATION_WINDOW_HOURS` controls how long a matching incident remains eligible for reuse.
+
+Examples:
+
+- `24` → reuse incidents active within the last 24 hours
+- `1` → only reuse incidents active within the last hour
+- `72` → reuse incidents active within the last 3 days
+
+If a matching incident is older than the configured window, a new incident is created.
 
 ---
 
@@ -456,12 +488,17 @@ The test suite covers:
 - event listing
 - event lookup by ID
 - incident creation from high-severity events
-- no incident creation from medium-severity events
+- incident severity escalation
+- incident reopening after closure
+- source-aware incident separation
+- configurable temporal correlation windows
+- multi-event burst correlation for medium events
+- cross-event attack-chain correlation
 - incident lookup by ID
 - incident event lookup
 - incident detail endpoint
 - incident timeline endpoint
-- repeated event correlation into a single incident
+- incident enrichment endpoint
 - summary statistics
 - manual incident closing
 - filtering for events
@@ -472,12 +509,8 @@ The test suite covers:
 
 ## Generic event ingestion example
 
-You can send a normalized event manually with `curl`:
-
 ```bash
-curl -X POST "http://localhost:8000/events/ingest" \
-  -H "Content-Type: application/json" \
-  -d '{
+curl -X POST "http://localhost:8000/events/ingest"   -H "Content-Type: application/json"   -d '{
     "source": "falco",
     "event_type": "reverse_shell_detected",
     "severity": "critical",
@@ -495,12 +528,8 @@ curl -X POST "http://localhost:8000/events/ingest" \
 
 ## Falco ingestion example
 
-You can also send a Falco-style payload:
-
 ```bash
-curl -X POST "http://localhost:8000/events/ingest/falco" \
-  -H "Content-Type: application/json" \
-  -d '{
+curl -X POST "http://localhost:8000/events/ingest/falco"   -H "Content-Type: application/json"   -d '{
     "output": "A shell was spawned in a container",
     "priority": "Error",
     "rule": "Terminal shell in container",
@@ -512,24 +541,12 @@ curl -X POST "http://localhost:8000/events/ingest/falco" \
   }'
 ```
 
-Expected normalization:
-
-- `source` becomes `falco`
-- `event_type` becomes `terminal_shell_in_container`
-- `priority=Error` maps to `severity=high`
-- `evt.hostname` maps to `hostname`
-- `container.name` maps to `container_name`
-
 ---
 
 ## Suricata ingestion example
 
-You can also send a Suricata-style payload:
-
 ```bash
-curl -X POST "http://localhost:8000/events/ingest/suricata" \
-  -H "Content-Type: application/json" \
-  -d '{
+curl -X POST "http://localhost:8000/events/ingest/suricata"   -H "Content-Type: application/json"   -d '{
     "timestamp": "2026-04-27T10:48:58.801038Z",
     "event_type": "alert",
     "src_ip": "10.10.0.5",
@@ -546,234 +563,81 @@ curl -X POST "http://localhost:8000/events/ingest/suricata" \
   }'
 ```
 
-Expected normalization:
-
-- `source` becomes `suricata`
-- `event_type` becomes `et_malware_cnc_beacon_activity`
-- `alert.severity=2` maps to `severity=high`
-- `host` maps to `hostname`
-- `app_proto` or `proto` maps into the normalized context field used by the API
-
----
-
-## Send sample events
-
-The project includes sample events in:
-
-```text
-lab/sample_events/falco_samples.json
-```
-
-To send them to the running API:
-
-```bash
-python scripts/send_sample_events.py
-```
-
-You can also provide a custom base URL:
-
-```bash
-python scripts/send_sample_events.py http://localhost:8000
-```
-
----
-
-## Example investigation flow
-
-After sending sample events, inspect the API.
-
-### List events
-
-```bash
-curl http://localhost:8000/events
-```
-
-### List incidents
-
-```bash
-curl http://localhost:8000/incidents
-```
-
-### Get a single incident
-
-```bash
-curl http://localhost:8000/incidents/1
-```
-
-### Get all events linked to an incident
-
-```bash
-curl http://localhost:8000/incidents/1/events
-```
-
-### Get incident detail with linked events
-
-```bash
-curl http://localhost:8000/incidents/1/detail
-```
-
-### Get incident timeline
-
-```bash
-curl http://localhost:8000/incidents/1/timeline
-```
-
-### Get summary statistics
-
-```bash
-curl http://localhost:8000/stats/summary
-```
-
-### Close an incident
-
-```bash
-curl -X PATCH "http://localhost:8000/incidents/1" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "status": "closed"
-  }'
-```
-
----
-
-## Filtering examples
-
-### Filter events by source and severity
-
-```bash
-curl "http://localhost:8000/events?source=falco&severity=critical"
-```
-
-### Filter events by event type
-
-```bash
-curl "http://localhost:8000/events?event_type=credential_access"
-```
-
-### Filter events by hostname
-
-```bash
-curl "http://localhost:8000/events?hostname=node-11"
-```
-
-### Filter events by container name
-
-```bash
-curl "http://localhost:8000/events?container_name=api-gateway"
-```
-
-### Filter incidents by status and severity
-
-```bash
-curl "http://localhost:8000/incidents?status=open&severity=high"
-```
-
-### Filter incidents by title
-
-```bash
-curl "http://localhost:8000/incidents?title_contains=payments-service"
-```
-
----
-
-## Pagination and sorting examples
-
-### Paginate events
-
-```bash
-curl "http://localhost:8000/events?limit=2&offset=0"
-```
-
-### Sort events by hostname ascending
-
-```bash
-curl "http://localhost:8000/events?sort_by=hostname&sort_order=asc"
-```
-
-### Paginate incidents
-
-```bash
-curl "http://localhost:8000/incidents?limit=2&offset=0"
-```
-
-### Sort incidents by title descending
-
-```bash
-curl "http://localhost:8000/incidents?sort_by=title&sort_order=desc"
-```
-
----
-
-## Incident detail example
-
-You can retrieve a full incident view with linked events using:
-
-```bash
-curl "http://localhost:8000/incidents/1/detail"
-```
-
----
-
-## Incident timeline example
-
-You can retrieve a chronological incident timeline using:
-
-```bash
-curl "http://localhost:8000/incidents/1/timeline"
-```
-
----
-
-## Stats summary
-
-You can retrieve a summary of the current lab state with:
-
-```bash
-curl http://localhost:8000/stats/summary
-```
-
----
-
-## Manual incident updates
-
-You can manually update the lifecycle status of an incident.
-
-Example request:
-
-```bash
-curl -X PATCH "http://localhost:8000/incidents/1" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "status": "closed"
-  }'
-```
-
 ---
 
 ## Correlation rules
 
-Current rules are intentionally simple.
+Current rules now include:
 
-### Incident creation
+- source-aware correlation
+- incident severity escalation
+- incident reopening on recurring activity
+- configurable temporal correlation windows
+- medium-event burst promotion
+- attack-chain correlation across event types
+
+### High and critical events
 
 An event creates or updates an incident if:
 
 - severity is `high` or `critical`
 
-### Incident grouping
+### Correlation key
 
-Events are grouped into the same open incident if they share:
+The correlator uses a source-aware matching key so events from different telemetry systems are not merged by mistake.
 
-- `event_type`
-- `hostname`
-- `container_name`
+### Severity escalation
+
+If a matching incident already exists and a more severe event arrives later, the incident severity is raised.
+
+### Reopening behavior
+
+If a matching incident was previously closed and a new relevant event arrives inside the window, the incident is reopened automatically.
+
+### Temporal window
+
+A matching incident is only reused if its `last_seen` is recent enough.
+
+The window is controlled by:
+
+- `CORRELATION_WINDOW_HOURS`
+
+Default:
+
+- `24`
+
+If the last matching activity is older than the configured window, a new incident is created.
+
+### Medium burst promotion
+
+Repeated medium events can also create incidents.
+
+Default rule:
+
+- **3 medium events**
+- with the **same source-aware pattern**
+- within **15 minutes**
+
+When that happens, the system creates a **high** incident and links the related medium events to it.
+
+### Attack-chain correlation
+
+The correlator also watches for suspicious event sequences.
+
+Current rule:
+
+- `port_scan_detected`
+- followed by `credential_access` or `reverse_shell_detected`
+- with the same source, host, and container
+- within **10 minutes**
+
+When that happens, the incident severity is elevated to **critical**, and the precursor event is linked to the same incident.
 
 ### Incident exclusions
 
 Events with severity:
 
 - `low`
-- `medium`
 
 are stored only as events for now.
 
@@ -807,6 +671,7 @@ Key fields:
 - `description`
 - `severity`
 - `status`
+- `correlation_key`
 - `first_seen`
 - `last_seen`
 
@@ -829,6 +694,8 @@ This repository includes a GitHub Actions workflow that:
 - installs project dependencies
 - runs the test suite
 
+This helps verify that the project works in a clean environment and not only on a local machine.
+
 ---
 
 ## Example use cases
@@ -849,7 +716,9 @@ This project can be extended toward:
 
 Planned improvements:
 
-- richer correlation rules
+- configurable medium-burst thresholds
+- configurable attack-chain rules
+- richer multi-event correlation rules
 - normalized adapters for additional network telemetry formats
 - attack simulation scenarios
 - better incident detail enrichment
@@ -864,12 +733,11 @@ Planned improvements:
 
 This is an early lab implementation, so there are important limitations:
 
-- correlation logic is intentionally simple
+- correlation logic is still intentionally simple
 - there is no authentication yet
 - there are no database migrations yet
 - there is no frontend dashboard yet
 - events are ingested manually or from sample scripts
-- incident lifecycle management is still basic
 
 
 ---
@@ -890,7 +758,11 @@ This project is structured to grow in layers:
 10. detailed incident context
 11. normalized source adapters
 12. chronological incident reconstruction
-13. future integrations and orchestration
+13. improved correlation behavior
+14. configurable temporal windows
+15. multi-event burst correlation
+16. attack-chain correlation
+17. future integrations and orchestration
 
 The focus is not to add unnecessary complexity too early.
 
@@ -898,7 +770,7 @@ The focus is not to add unnecessary complexity too early.
 
 ## License
 
-***
+- MIT License
 
 ---
 
