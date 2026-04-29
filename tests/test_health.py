@@ -995,3 +995,102 @@ def test_suricata_medium_severity_does_not_create_incident(client):
     assert incidents_response.status_code == 200
     incidents = incidents_response.json()
     assert len(incidents) == 0
+
+def test_get_incident_enrichment(client):
+    payloads = [
+        {
+            "source": "falco",
+            "event_type": "reverse_shell_detected",
+            "severity": "critical",
+            "hostname": "node-enrich",
+            "container_name": "gateway-service",
+            "raw_event_json": {
+                "rule": "Reverse shell detected",
+                "process": "bash",
+            },
+        },
+        {
+            "source": "suricata",
+            "event_type": "reverse_shell_detected",
+            "severity": "high",
+            "hostname": "node-enrich",
+            "container_name": "gateway-service",
+            "raw_event_json": {
+                "message": "Outbound malicious traffic detected",
+            },
+        },
+    ]
+
+    for payload in payloads:
+        response = client.post("/events/ingest", json=payload)
+        assert response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=gateway-service")
+    assert incidents_response.status_code == 200
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+
+    incident_id = incidents[0]["id"]
+
+    enrichment_response = client.get(f"/incidents/{incident_id}/enrichment")
+    assert enrichment_response.status_code == 200
+
+    data = enrichment_response.json()
+    assert data["incident"]["id"] == incident_id
+    assert data["event_count"] == 2
+    assert data["sources_seen"] == ["falco", "suricata"]
+    assert data["hosts_seen"] == ["node-enrich"]
+    assert data["containers_seen"] == ["gateway-service"]
+    assert data["event_types_seen"] == ["reverse_shell_detected"]
+    assert data["counts_by_source"]["falco"] == 1
+    assert data["counts_by_source"]["suricata"] == 1
+    assert data["counts_by_severity"]["critical"] == 1
+    assert data["counts_by_severity"]["high"] == 1
+    assert data["counts_by_event_type"]["reverse_shell_detected"] == 2
+    assert data["first_activity"] is not None
+    assert data["last_activity"] is not None
+
+
+def test_get_incident_enrichment_not_found(client):
+    response = client.get("/incidents/999999/enrichment")
+    assert response.status_code == 404
+
+
+def test_enrichment_sorted_unique_values(client):
+    payloads = [
+        {
+            "source": "falco",
+            "event_type": "credential_access",
+            "severity": "high",
+            "hostname": "node-b",
+            "container_name": "service-z",
+            "raw_event_json": {"rule": "Sensitive file opened"},
+        },
+        {
+            "source": "falco",
+            "event_type": "credential_access",
+            "severity": "high",
+            "hostname": "node-a",
+            "container_name": "service-a",
+            "raw_event_json": {"rule": "Sensitive file opened"},
+        },
+    ]
+
+    for payload in payloads:
+        response = client.post("/events/ingest", json=payload)
+        assert response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=credential_access")
+    incidents = incidents_response.json()
+    assert len(incidents) == 2
+
+    target = next(
+        incident for incident in incidents if incident["title"] == "credential_access on node-a/service-a"
+    )
+
+    enrichment_response = client.get(f"/incidents/{target['id']}/enrichment")
+    assert enrichment_response.status_code == 200
+
+    data = enrichment_response.json()
+    assert data["hosts_seen"] == ["node-a"]
+    assert data["containers_seen"] == ["service-a"]

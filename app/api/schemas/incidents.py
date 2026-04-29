@@ -49,3 +49,18 @@ class IncidentTimelineResponse(BaseModel):
     incident: IncidentResponse
     timeline: list[TimelineEventResponse]
     event_count: int
+
+
+class IncidentEnrichmentResponse(BaseModel):
+    incident: IncidentResponse
+    event_count: int
+    sources_seen: list[str]
+    severities_seen: list[str]
+    hosts_seen: list[str]
+    containers_seen: list[str]
+    event_types_seen: list[str]
+    first_activity: datetime | None
+    last_activity: datetime | None
+    counts_by_source: dict[str, int]
+    counts_by_severity: dict[str, int]
+    counts_by_event_type: dict[str, int]
