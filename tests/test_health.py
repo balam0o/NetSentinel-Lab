@@ -1344,3 +1344,115 @@ def test_configurable_long_correlation_window_reuses_incident(client, monkeypatc
     refreshed_response = client.get("/incidents?title_contains=gateway-api")
     refreshed_incidents = refreshed_response.json()
     assert len(refreshed_incidents) == 1
+
+def test_repeated_medium_events_create_incident_after_threshold(client):
+    payload = {
+        "source": "simulator",
+        "event_type": "port_scan_detected",
+        "severity": "medium",
+        "hostname": "node-burst",
+        "container_name": "scanner-box",
+        "raw_event_json": {"ports": [21, 22, 80]},
+    }
+
+    response_1 = client.post("/events/ingest", json=payload)
+    response_2 = client.post("/events/ingest", json=payload)
+
+    assert response_1.status_code == 201
+    assert response_2.status_code == 201
+
+    before_response = client.get("/incidents?title_contains=scanner-box")
+    assert before_response.status_code == 200
+    assert len(before_response.json()) == 0
+
+    response_3 = client.post("/events/ingest", json=payload)
+    assert response_3.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=scanner-box")
+    assert incidents_response.status_code == 200
+
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+    assert incidents[0]["title"] == "port_scan_detected on node-burst/scanner-box"
+    assert incidents[0]["severity"] == "high"
+
+    incident_id = incidents[0]["id"]
+
+    related_events_response = client.get(f"/incidents/{incident_id}/events")
+    assert related_events_response.status_code == 200
+    related_events = related_events_response.json()
+    assert len(related_events) == 3
+    assert all(event["severity"] == "medium" for event in related_events)
+
+
+def test_medium_burst_correlation_is_source_aware(client):
+    falco_payload = {
+        "source": "falco",
+        "event_type": "port_scan_detected",
+        "severity": "medium",
+        "hostname": "node-source-burst",
+        "container_name": "scanner-box",
+        "raw_event_json": {"rule": "Port scan detected"},
+    }
+
+    suricata_payload = {
+        "source": "suricata",
+        "event_type": "port_scan_detected",
+        "severity": "medium",
+        "hostname": "node-source-burst",
+        "container_name": "scanner-box",
+        "raw_event_json": {"message": "Port scan detected"},
+    }
+
+    assert client.post("/events/ingest", json=falco_payload).status_code == 201
+    assert client.post("/events/ingest", json=falco_payload).status_code == 201
+    assert client.post("/events/ingest", json=suricata_payload).status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=scanner-box")
+    assert incidents_response.status_code == 200
+    assert len(incidents_response.json()) == 0
+
+    assert client.post("/events/ingest", json=falco_payload).status_code == 201
+
+    refreshed_response = client.get("/incidents?title_contains=scanner-box")
+    assert refreshed_response.status_code == 200
+    incidents = refreshed_response.json()
+
+    assert len(incidents) == 1
+    assert incidents[0]["title"] == "port_scan_detected on node-source-burst/scanner-box"
+    assert incidents[0]["severity"] == "high"
+
+
+def test_additional_medium_event_is_attached_to_existing_burst_incident(client):
+    payload = {
+        "source": "simulator",
+        "event_type": "suspicious_process",
+        "severity": "medium",
+        "hostname": "node-medium-attach",
+        "container_name": "worker-box",
+        "raw_event_json": {"process": "nc"},
+    }
+
+    for _ in range(3):
+        response = client.post("/events/ingest", json=payload)
+        assert response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=worker-box")
+    assert incidents_response.status_code == 200
+    incidents = incidents_response.json()
+    assert len(incidents) == 1
+
+    incident_id = incidents[0]["id"]
+
+    fourth_response = client.post("/events/ingest", json=payload)
+    assert fourth_response.status_code == 201
+
+    refreshed_incidents_response = client.get("/incidents?title_contains=worker-box")
+    assert refreshed_incidents_response.status_code == 200
+    refreshed_incidents = refreshed_incidents_response.json()
+    assert len(refreshed_incidents) == 1
+
+    events_response = client.get(f"/incidents/{incident_id}/events")
+    assert events_response.status_code == 200
+    events = events_response.json()
+    assert len(events) == 4

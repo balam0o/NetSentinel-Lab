@@ -16,21 +16,23 @@ SEVERITY_RANK = {
 }
 
 DEFAULT_CORRELATION_WINDOW_HOURS = 24
+DEFAULT_MEDIUM_BURST_THRESHOLD = 3
+DEFAULT_MEDIUM_BURST_WINDOW_MINUTES = 15
 
 
 def correlate_event(db: Session, event: Event) -> Incident | None:
-    if event.severity not in {"high", "critical"}:
-        return None
+    if event.severity in {"high", "critical"}:
+        return correlate_high_or_critical_event(db, event)
 
+    if event.severity == "medium":
+        return correlate_medium_event(db, event)
+
+    return None
+
+
+def correlate_high_or_critical_event(db: Session, event: Event) -> Incident | None:
     correlation_key = build_correlation_key(event)
-
-    statement = (
-        select(Incident)
-        .where(Incident.correlation_key == correlation_key)
-        .order_by(Incident.last_seen.desc(), Incident.id.desc())
-    )
-
-    existing_incident = db.execute(statement).scalars().first()
+    existing_incident = get_latest_matching_incident(db, correlation_key)
 
     if existing_incident is not None:
         if is_within_correlation_window(existing_incident.last_seen, event.created_at):
@@ -47,23 +49,80 @@ def correlate_event(db: Session, event: Event) -> Incident | None:
             db.refresh(existing_incident)
             return existing_incident
 
-    incident = Incident(
-        title=build_incident_title(event),
-        description=build_incident_description(event),
+    incident = create_incident(
+        db=db,
+        event=event,
         severity=event.severity,
-        status="open",
-        correlation_key=correlation_key,
-        first_seen=event.created_at,
-        last_seen=event.created_at,
+        description=build_incident_description(event),
+    )
+    link_event_to_incident(db, incident, event)
+    db.commit()
+    db.refresh(incident)
+    return incident
+
+
+def correlate_medium_event(db: Session, event: Event) -> Incident | None:
+    correlation_key = build_correlation_key(event)
+    existing_incident = get_latest_matching_incident(db, correlation_key)
+
+    if existing_incident is not None:
+        if is_within_correlation_window(existing_incident.last_seen, event.created_at):
+            existing_incident.last_seen = event.created_at
+
+            if existing_incident.status == "closed":
+                existing_incident.status = "open"
+
+            link_event_to_incident(db, existing_incident, event)
+            db.commit()
+            db.refresh(existing_incident)
+            return existing_incident
+
+    recent_medium_events = get_recent_matching_medium_events(db, event)
+
+    if not qualifies_for_medium_burst(recent_medium_events):
+        return None
+
+    incident = create_incident(
+        db=db,
+        event=event,
+        severity="high",
+        description=build_medium_burst_incident_description(event, len(recent_medium_events)),
     )
 
-    db.add(incident)
-    db.flush()
-
-    link_event_to_incident(db, incident, event)
+    for related_event in recent_medium_events:
+        link_event_to_incident(db, incident, related_event)
 
     db.commit()
     db.refresh(incident)
+    return incident
+
+
+def get_latest_matching_incident(db: Session, correlation_key: str) -> Incident | None:
+    statement = (
+        select(Incident)
+        .where(Incident.correlation_key == correlation_key)
+        .order_by(Incident.last_seen.desc(), Incident.id.desc())
+    )
+    return db.execute(statement).scalars().first()
+
+
+def create_incident(
+    db: Session,
+    event: Event,
+    severity: str,
+    description: str,
+) -> Incident:
+    incident = Incident(
+        title=build_incident_title(event),
+        description=description,
+        severity=severity,
+        status="open",
+        correlation_key=build_correlation_key(event),
+        first_seen=event.created_at,
+        last_seen=event.created_at,
+    )
+    db.add(incident)
+    db.flush()
     return incident
 
 
@@ -77,6 +136,14 @@ def build_incident_description(event: Event) -> str:
     return (
         f"Incident created from {event.source} event '{event.event_type}' "
         f"with severity '{event.severity}'."
+    )
+
+
+def build_medium_burst_incident_description(event: Event, count: int) -> str:
+    return (
+        f"Incident created from repeated medium-severity {event.source} events "
+        f"for '{event.event_type}' ({count} events within "
+        f"{get_medium_burst_window_minutes()} minutes)."
     )
 
 
@@ -111,11 +178,62 @@ def get_correlation_window() -> timedelta:
     return timedelta(hours=get_correlation_window_hours())
 
 
+def get_medium_burst_threshold() -> int:
+    return DEFAULT_MEDIUM_BURST_THRESHOLD
+
+
+def get_medium_burst_window_minutes() -> int:
+    return DEFAULT_MEDIUM_BURST_WINDOW_MINUTES
+
+
+def get_medium_burst_window() -> timedelta:
+    return timedelta(minutes=get_medium_burst_window_minutes())
+
+
 def is_within_correlation_window(last_seen: datetime, event_created_at: datetime) -> bool:
     last_seen_utc = ensure_utc(last_seen)
     event_created_at_utc = ensure_utc(event_created_at)
     delta = event_created_at_utc - last_seen_utc
     return delta <= get_correlation_window()
+
+
+def get_recent_matching_medium_events(db: Session, event: Event) -> list[Event]:
+    threshold = get_medium_burst_threshold()
+
+    statement = (
+        select(Event)
+        .where(
+            Event.source == event.source,
+            Event.event_type == event.event_type,
+            nullable_match(Event.hostname, event.hostname),
+            nullable_match(Event.container_name, event.container_name),
+            Event.severity == "medium",
+        )
+        .order_by(Event.created_at.desc(), Event.id.desc())
+        .limit(threshold)
+    )
+
+    events = db.execute(statement).scalars().all()
+    events.reverse()
+    return events
+
+
+def qualifies_for_medium_burst(events: list[Event]) -> bool:
+    threshold = get_medium_burst_threshold()
+
+    if len(events) < threshold:
+        return False
+
+    first_event_time = ensure_utc(events[0].created_at)
+    last_event_time = ensure_utc(events[-1].created_at)
+
+    return (last_event_time - first_event_time) <= get_medium_burst_window()
+
+
+def nullable_match(column, value):
+    if value is None:
+        return column.is_(None)
+    return column == value
 
 
 def link_event_to_incident(db: Session, incident: Incident, event: Event) -> None:
