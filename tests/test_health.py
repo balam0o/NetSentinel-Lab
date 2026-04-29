@@ -1593,3 +1593,103 @@ def test_attack_chain_is_source_aware(client):
 
     assert len(linked_events) == 1
     assert linked_events[0]["event_type"] == "credential_access"
+
+def test_configurable_medium_burst_threshold_creates_incident_earlier(client, monkeypatch):
+    monkeypatch.setattr(correlator, "get_medium_burst_threshold", lambda: 2)
+
+    payload = {
+        "source": "simulator",
+        "event_type": "port_scan_detected",
+        "severity": "medium",
+        "hostname": "node-config-burst",
+        "container_name": "scanner-box",
+        "raw_event_json": {"ports": [21, 22, 80]},
+    }
+
+    first_response = client.post("/events/ingest", json=payload)
+    assert first_response.status_code == 201
+
+    before_response = client.get("/incidents?title_contains=scanner-box")
+    assert before_response.status_code == 200
+    assert len(before_response.json()) == 0
+
+    second_response = client.post("/events/ingest", json=payload)
+    assert second_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=scanner-box")
+    assert incidents_response.status_code == 200
+    incidents = incidents_response.json()
+
+    assert len(incidents) == 1
+    assert incidents[0]["severity"] == "high"
+
+
+def test_configurable_medium_burst_window_blocks_old_events(client, monkeypatch):
+    monkeypatch.setattr(correlator, "get_medium_burst_threshold", lambda: 2)
+    monkeypatch.setattr(correlator, "get_medium_burst_window_minutes", lambda: 1)
+
+    payload = {
+        "source": "simulator",
+        "event_type": "suspicious_process",
+        "severity": "medium",
+        "hostname": "node-config-window",
+        "container_name": "worker-box",
+        "raw_event_json": {"process": "nc"},
+    }
+
+    first_response = client.post("/events/ingest", json=payload)
+    assert first_response.status_code == 201
+    first_event_id = first_response.json()["id"]
+
+    with SessionLocal() as db:
+        event = db.get(Event, first_event_id)
+        event.created_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        db.commit()
+
+    second_response = client.post("/events/ingest", json=payload)
+    assert second_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=worker-box")
+    assert incidents_response.status_code == 200
+    assert len(incidents_response.json()) == 0
+
+
+def test_configurable_attack_chain_window_allows_older_precursor(client, monkeypatch):
+    monkeypatch.setattr(correlator, "get_attack_chain_window_minutes", lambda: 30)
+
+    port_scan_payload = {
+        "source": "simulator",
+        "event_type": "port_scan_detected",
+        "severity": "medium",
+        "hostname": "node-config-chain",
+        "container_name": "attack-box",
+        "raw_event_json": {"ports": [21, 22, 80]},
+    }
+
+    credential_payload = {
+        "source": "simulator",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-config-chain",
+        "container_name": "attack-box",
+        "raw_event_json": {"file": "/etc/shadow"},
+    }
+
+    first_response = client.post("/events/ingest", json=port_scan_payload)
+    assert first_response.status_code == 201
+    port_scan_event_id = first_response.json()["id"]
+
+    with SessionLocal() as db:
+        event = db.get(Event, port_scan_event_id)
+        event.created_at = datetime.now(timezone.utc) - timedelta(minutes=20)
+        db.commit()
+
+    second_response = client.post("/events/ingest", json=credential_payload)
+    assert second_response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=attack-box")
+    assert incidents_response.status_code == 200
+    incidents = incidents_response.json()
+
+    assert len(incidents) == 1
+    assert incidents[0]["severity"] == "critical"

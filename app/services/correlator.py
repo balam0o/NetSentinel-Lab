@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+import app.core.settings as settings
 from app.db.models import Event, Incident, IncidentEvent
 
 SEVERITY_RANK = {
@@ -14,11 +14,6 @@ SEVERITY_RANK = {
     "high": 3,
     "critical": 4,
 }
-
-DEFAULT_CORRELATION_WINDOW_HOURS = 24
-DEFAULT_MEDIUM_BURST_THRESHOLD = 3
-DEFAULT_MEDIUM_BURST_WINDOW_MINUTES = 15
-DEFAULT_ATTACK_CHAIN_WINDOW_MINUTES = 10
 
 
 def correlate_event(db: Session, event: Event) -> Incident | None:
@@ -191,14 +186,7 @@ def ensure_utc(dt: datetime) -> datetime:
 
 
 def get_correlation_window_hours() -> int:
-    raw_value = os.getenv("CORRELATION_WINDOW_HOURS", str(DEFAULT_CORRELATION_WINDOW_HOURS))
-
-    try:
-        hours = int(raw_value)
-    except ValueError:
-        return DEFAULT_CORRELATION_WINDOW_HOURS
-
-    return max(1, hours)
+    return settings.get_correlation_window_hours()
 
 
 def get_correlation_window() -> timedelta:
@@ -206,11 +194,11 @@ def get_correlation_window() -> timedelta:
 
 
 def get_medium_burst_threshold() -> int:
-    return DEFAULT_MEDIUM_BURST_THRESHOLD
+    return settings.get_medium_burst_threshold()
 
 
 def get_medium_burst_window_minutes() -> int:
-    return DEFAULT_MEDIUM_BURST_WINDOW_MINUTES
+    return settings.get_medium_burst_window_minutes()
 
 
 def get_medium_burst_window() -> timedelta:
@@ -218,7 +206,7 @@ def get_medium_burst_window() -> timedelta:
 
 
 def get_attack_chain_window_minutes() -> int:
-    return DEFAULT_ATTACK_CHAIN_WINDOW_MINUTES
+    return settings.get_attack_chain_window_minutes()
 
 
 def get_attack_chain_window() -> timedelta:
