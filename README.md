@@ -761,3 +761,14 @@ The focus is not to add unnecessary complexity too early.
 ## Author
 
 Built as a portfolio project focused on backend engineering, security event processing, and cloud-native defensive workflows.
+
+## Dashboard preview
+
+### Overview
+![NetSentinel dashboard overview](docs/images/dashboard-overview.png)
+
+### Incident detail
+![NetSentinel incident detail](docs/images/dashboard-detail.png)
+
+### Timeline view
+![NetSentinel incident timeline](docs/images/dashboard-timeline.png)
