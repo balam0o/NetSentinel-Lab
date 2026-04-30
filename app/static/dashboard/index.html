@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>NetSentinel Dashboard</title>
-  <link rel="stylesheet" href="/dashboard-assets/dashboard.css?v=3" />
+  <link rel="stylesheet" href="/dashboard-assets/dashboard.css?v=4" />
 </head>
 <body>
   <div class="page">
@@ -42,6 +42,22 @@
       <article class="stat-card">
         <span class="stat-label">Top Severity</span>
         <strong id="topSeverity">-</strong>
+      </article>
+    </section>
+
+    <section class="chart-grid">
+      <article class="panel">
+        <div class="panel-header">
+          <h2>Incidents by Severity</h2>
+        </div>
+        <div id="severityChart" class="chart-content"></div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <h2>Events by Source</h2>
+        </div>
+        <div id="sourceChart" class="chart-content"></div>
       </article>
     </section>
 
@@ -130,6 +146,6 @@
     </section>
   </div>
 
-  <script src="/dashboard-assets/dashboard.js?v=3"></script>
+  <script src="/dashboard-assets/dashboard.js?v=4"></script>
 </body>
 </html>

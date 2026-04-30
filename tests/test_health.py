@@ -1784,3 +1784,16 @@ def test_openapi_marks_events_endpoint_as_protected(client):
     operation = data["paths"]["/events/ingest"]["post"]
 
     assert {"ApiKeyAuth": []} in operation["security"]
+
+def test_dashboard_contains_chart_panels(client):
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "severityChart" in response.text
+    assert "sourceChart" in response.text
+
+
+def test_dashboard_js_contains_chart_rendering_logic(client):
+    response = client.get("/dashboard-assets/dashboard.js?v=4")
+    assert response.status_code == 200
+    assert "renderBarChart" in response.text
+    assert "renderCharts" in response.text

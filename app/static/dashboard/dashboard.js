@@ -8,6 +8,9 @@ const incidentCountEl = document.getElementById("incidentCount");
 const incidentDetailEl = document.getElementById("incidentDetail");
 const incidentTimelineEl = document.getElementById("incidentTimeline");
 
+const severityChartEl = document.getElementById("severityChart");
+const sourceChartEl = document.getElementById("sourceChart");
+
 const refreshButton = document.getElementById("refreshButton");
 const applyFiltersButton = document.getElementById("applyFiltersButton");
 
@@ -117,6 +120,38 @@ async function fetchJson(url, options = {}) {
   return response.json();
 }
 
+function renderBarChart(container, dataMap) {
+  const entries = Object.entries(dataMap || {}).filter(([, value]) => value > 0);
+
+  if (!entries.length) {
+    container.innerHTML = `<div class="chart-empty">No data available.</div>`;
+    return;
+  }
+
+  const maxValue = Math.max(...entries.map(([, value]) => value));
+
+  container.innerHTML = entries
+    .map(([label, value]) => {
+      const width = maxValue > 0 ? (value / maxValue) * 100 : 0;
+
+      return `
+        <div class="chart-row">
+          <div class="chart-label">${escapeHtml(label)}</div>
+          <div class="chart-bar-wrap">
+            <div class="chart-bar" style="width: ${width}%"></div>
+          </div>
+          <div class="chart-value">${escapeHtml(value)}</div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderCharts(data) {
+  renderBarChart(severityChartEl, data.incidents_by_severity || {});
+  renderBarChart(sourceChartEl, data.events_by_source || {});
+}
+
 async function loadSummary() {
   const data = await fetchJson("/stats/summary");
 
@@ -124,6 +159,7 @@ async function loadSummary() {
   totalIncidentsEl.textContent = data.total_incidents ?? 0;
   openIncidentsEl.textContent = data.open_incidents ?? 0;
   topSeverityEl.textContent = getTopSeverityLabel(data.incidents_by_severity);
+  renderCharts(data);
 }
 
 function buildIncidentQuery() {
@@ -308,6 +344,8 @@ async function refreshDashboard() {
     totalIncidentsEl.textContent = "-";
     openIncidentsEl.textContent = "-";
     topSeverityEl.textContent = "-";
+    severityChartEl.innerHTML = `<div class="chart-empty">No data available.</div>`;
+    sourceChartEl.innerHTML = `<div class="chart-empty">No data available.</div>`;
     incidentTableBody.innerHTML = `
       <tr>
         <td colspan="4" class="empty-state">Could not load incidents.</td>

@@ -50,6 +50,7 @@ This version includes:
 - Automated tests with pytest
 - GitHub Actions CI
 - Close and reopen incidents directly from the dashboard
+- Visual dashboard charts for incident severity and event sources
 
 ---
 
@@ -231,6 +232,7 @@ It provides:
 - incident detail view
 - incident timeline view
 - direct incident status updates from the UI
+- visual charts for incident severity and event sources
 
 ### 7. Summary statistics
 
@@ -557,6 +559,11 @@ The dashboard shows:
 - an action button to close or reopen incidents
 
 It uses the same backend API endpoints already exposed by the service.
+
+The dashboard also includes chart panels that visualize:
+
+- incidents grouped by severity
+- events grouped by source
 
 ---
 
