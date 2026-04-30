@@ -1,14 +1,18 @@
 from typing import Annotated
-
 from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-
 from app.api.schemas.stats import StatsSummaryResponse
 from app.db.models import Event, Incident
 from app.db.session import get_db
+from fastapi import APIRouter, Depends
+from app.core.auth import require_api_key
 
-router = APIRouter(prefix="/stats", tags=["stats"])
+router = APIRouter(
+    prefix="/stats",
+    tags=["stats"],
+    dependencies=[Depends(require_api_key)],
+)
 
 DbSession = Annotated[Session, Depends(get_db)]
 

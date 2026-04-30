@@ -246,3 +246,41 @@ tbody tr.selected-row {
     flex-direction: column;
   }
 }
+
+.auth-panel {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  padding: 16px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.auth-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 220px;
+}
+
+.auth-group.grow {
+  flex: 1;
+}
+
+.auth-status {
+  min-height: 20px;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+.auth-status.success {
+  color: #4ade80;
+}
+
+.auth-status.error {
+  color: #f87171;
+}

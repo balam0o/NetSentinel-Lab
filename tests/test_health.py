@@ -1724,3 +1724,31 @@ def test_dashboard_js_contains_incident_status_update_action(client):
     assert response.status_code == 200
     assert 'method: "PATCH"' in response.text
     assert "toggleSelectedIncidentStatus" in response.text
+
+def test_protected_endpoint_requires_api_key_when_enabled(client, monkeypatch):
+    monkeypatch.setenv("NETSENTINEL_API_KEY", "test-key")
+
+    response = client.get("/incidents")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid or missing API key"
+
+
+def test_protected_endpoint_accepts_api_key_when_enabled(client, monkeypatch):
+    monkeypatch.setenv("NETSENTINEL_API_KEY", "test-key")
+
+    response = client.get("/incidents", headers={"X-API-Key": "test-key"})
+    assert response.status_code == 200
+
+
+def test_dashboard_contains_api_key_controls(client):
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "apiKeyInput" in response.text
+    assert "saveApiKeyButton" in response.text
+
+
+def test_dashboard_js_sends_api_key_header(client):
+    response = client.get("/dashboard-assets/dashboard.js?v=3")
+    assert response.status_code == 200
+    assert "X-API-Key" in response.text
+    assert "localStorage" in response.text

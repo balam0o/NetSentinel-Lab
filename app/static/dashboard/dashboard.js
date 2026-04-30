@@ -18,6 +18,13 @@ const titleFilterEl = document.getElementById("titleFilter");
 const toggleIncidentStatusButton = document.getElementById("toggleIncidentStatusButton");
 const incidentActionMessage = document.getElementById("incidentActionMessage");
 
+const apiKeyInputEl = document.getElementById("apiKeyInput");
+const saveApiKeyButton = document.getElementById("saveApiKeyButton");
+const clearApiKeyButton = document.getElementById("clearApiKeyButton");
+const authStatusMessageEl = document.getElementById("authStatusMessage");
+
+const STORAGE_KEY = "netsentinel_api_key";
+
 let selectedIncidentId = null;
 let selectedIncidentStatus = null;
 
@@ -45,10 +52,25 @@ function getTopSeverityLabel(incidentsBySeverity) {
   return "-";
 }
 
+function getSavedApiKey() {
+  return localStorage.getItem(STORAGE_KEY) || "";
+}
+
+function getActiveApiKey() {
+  return apiKeyInputEl.value.trim() || getSavedApiKey();
+}
+
+function setAuthStatus(message = "", type = "") {
+  authStatusMessageEl.textContent = message;
+  authStatusMessageEl.className = "auth-status";
+  if (type) {
+    authStatusMessageEl.classList.add(type);
+  }
+}
+
 function setActionMessage(message = "", type = "") {
   incidentActionMessage.textContent = message;
   incidentActionMessage.className = "action-message";
-
   if (type) {
     incidentActionMessage.classList.add(type);
   }
@@ -66,9 +88,37 @@ function updateIncidentActionButton() {
     selectedIncidentStatus === "open" ? "Close incident" : "Reopen incident";
 }
 
+function buildHeaders(extraHeaders = {}) {
+  const headers = { ...extraHeaders };
+  const apiKey = getActiveApiKey();
+
+  if (apiKey) {
+    headers["X-API-Key"] = apiKey;
+  }
+
+  return headers;
+}
+
+async function fetchJson(url, options = {}) {
+  const response = await fetch(url, {
+    ...options,
+    headers: buildHeaders(options.headers || {}),
+  });
+
+  if (response.status === 401) {
+    throw new Error("unauthorized");
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || "Request failed");
+  }
+
+  return response.json();
+}
+
 async function loadSummary() {
-  const response = await fetch("/stats/summary");
-  const data = await response.json();
+  const data = await fetchJson("/stats/summary");
 
   totalEventsEl.textContent = data.total_events ?? 0;
   totalIncidentsEl.textContent = data.total_incidents ?? 0;
@@ -104,8 +154,7 @@ async function loadIncidents(preferredIncidentId = selectedIncidentId) {
     </tr>
   `;
 
-  const response = await fetch(buildIncidentQuery());
-  const incidents = await response.json();
+  const incidents = await fetchJson(buildIncidentQuery());
 
   incidentCountEl.textContent = `${incidents.length} result(s)`;
 
@@ -164,8 +213,7 @@ async function loadIncidents(preferredIncidentId = selectedIncidentId) {
 async function loadIncidentDetail(incidentId) {
   incidentDetailEl.innerHTML = "Loading detail...";
 
-  const response = await fetch(`/incidents/${incidentId}/detail`);
-  const data = await response.json();
+  const data = await fetchJson(`/incidents/${incidentId}/detail`);
 
   selectedIncidentStatus = data.incident.status;
   updateIncidentActionButton();
@@ -191,8 +239,7 @@ async function loadIncidentDetail(incidentId) {
 async function loadIncidentTimeline(incidentId) {
   incidentTimelineEl.innerHTML = "Loading timeline...";
 
-  const response = await fetch(`/incidents/${incidentId}/timeline`);
-  const data = await response.json();
+  const data = await fetchJson(`/incidents/${incidentId}/timeline`);
 
   if (!data.timeline.length) {
     incidentTimelineEl.innerHTML = `<div class="detail-block">No timeline events found.</div>`;
@@ -224,7 +271,7 @@ async function toggleSelectedIncidentStatus() {
   setActionMessage("Updating incident status...");
 
   try {
-    const response = await fetch(`/incidents/${selectedIncidentId}`, {
+    const updatedIncident = await fetchJson(`/incidents/${selectedIncidentId}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
@@ -232,32 +279,75 @@ async function toggleSelectedIncidentStatus() {
       body: JSON.stringify({ status: nextStatus }),
     });
 
-    if (!response.ok) {
-      throw new Error("Failed to update incident status.");
-    }
-
-    const updatedIncident = await response.json();
     selectedIncidentStatus = updatedIncident.status;
     updateIncidentActionButton();
 
-    setActionMessage(
-      `Incident updated to '${updatedIncident.status}'.`,
-      "success"
-    );
+    setActionMessage(`Incident updated to '${updatedIncident.status}'.`, "success");
 
     await loadSummary();
     await loadIncidents(selectedIncidentId);
   } catch (error) {
-    setActionMessage("Could not update incident status.", "error");
+    if (error.message === "unauthorized") {
+      setActionMessage("Unauthorized. Save a valid API key.", "error");
+    } else {
+      setActionMessage("Could not update incident status.", "error");
+    }
     updateIncidentActionButton();
   }
 }
 
 async function refreshDashboard() {
   setActionMessage("");
-  await loadSummary();
-  await loadIncidents();
+
+  try {
+    await loadSummary();
+    await loadIncidents();
+    setAuthStatus(getActiveApiKey() ? "API key loaded." : "Auth disabled or no key saved.");
+  } catch (error) {
+    totalEventsEl.textContent = "-";
+    totalIncidentsEl.textContent = "-";
+    openIncidentsEl.textContent = "-";
+    topSeverityEl.textContent = "-";
+    incidentTableBody.innerHTML = `
+      <tr>
+        <td colspan="4" class="empty-state">Could not load incidents.</td>
+      </tr>
+    `;
+    incidentDetailEl.textContent = "Select an incident to inspect details.";
+    incidentTimelineEl.textContent = "Timeline will appear here after selecting an incident.";
+    selectedIncidentId = null;
+    selectedIncidentStatus = null;
+    updateIncidentActionButton();
+
+    if (error.message === "unauthorized") {
+      setAuthStatus("Unauthorized. Enter and save a valid API key.", "error");
+    } else {
+      setAuthStatus("Could not load dashboard data.", "error");
+    }
+  }
 }
+
+function saveApiKey() {
+  const value = apiKeyInputEl.value.trim();
+
+  if (!value) {
+    setAuthStatus("Enter an API key before saving.", "error");
+    return;
+  }
+
+  localStorage.setItem(STORAGE_KEY, value);
+  setAuthStatus("API key saved.", "success");
+  refreshDashboard();
+}
+
+function clearApiKey() {
+  localStorage.removeItem(STORAGE_KEY);
+  apiKeyInputEl.value = "";
+  setAuthStatus("API key cleared.");
+  refreshDashboard();
+}
+
+apiKeyInputEl.value = getSavedApiKey();
 
 refreshButton.addEventListener("click", refreshDashboard);
 applyFiltersButton.addEventListener("click", async () => {
@@ -265,5 +355,7 @@ applyFiltersButton.addEventListener("click", async () => {
   await loadIncidents();
 });
 toggleIncidentStatusButton.addEventListener("click", toggleSelectedIncidentStatus);
+saveApiKeyButton.addEventListener("click", saveApiKey);
+clearApiKeyButton.addEventListener("click", clearApiKey);
 
 refreshDashboard();

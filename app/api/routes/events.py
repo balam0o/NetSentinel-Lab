@@ -1,18 +1,22 @@
 import re
 from typing import Annotated, Any, Literal
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import asc, desc, select
 from sqlalchemy.orm import Session
-
 from app.api.schemas.events import EventIngest, EventResponse, SeverityLevel
 from app.api.schemas.falco import FalcoEventIngest
 from app.api.schemas.suricata import SuricataEventIngest
 from app.db.models import Event
 from app.db.session import get_db
 from app.services.correlator import correlate_event
+from fastapi import APIRouter, Depends
+from app.core.auth import require_api_key
 
-router = APIRouter(prefix="/events", tags=["events"])
+router = APIRouter(
+    prefix="/events",
+    tags=["events"],
+    dependencies=[Depends(require_api_key)],
+)
 
 DbSession = Annotated[Session, Depends(get_db)]
 

@@ -1,10 +1,8 @@
 from collections import Counter
 from typing import Annotated, Literal
-
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import asc, desc, select
 from sqlalchemy.orm import Session
-
 from app.api.schemas.events import EventResponse, SeverityLevel
 from app.api.schemas.incidents import (
     IncidentDetailResponse,
@@ -17,8 +15,14 @@ from app.api.schemas.incidents import (
 )
 from app.db.models import Event, Incident, IncidentEvent
 from app.db.session import get_db
+from fastapi import APIRouter, Depends
+from app.core.auth import require_api_key
 
-router = APIRouter(prefix="/incidents", tags=["incidents"])
+router = APIRouter(
+    prefix="/incidents",
+    tags=["incidents"],
+    dependencies=[Depends(require_api_key)],
+)
 
 DbSession = Annotated[Session, Depends(get_db)]
 

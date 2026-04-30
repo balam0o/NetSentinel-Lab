@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>NetSentinel Dashboard</title>
-  <link rel="stylesheet" href="/dashboard-assets/dashboard.css" />
+  <link rel="stylesheet" href="/dashboard-assets/dashboard.css?v=3" />
 </head>
 <body>
   <div class="page">
@@ -15,6 +15,16 @@
       </div>
       <button id="refreshButton">Refresh</button>
     </header>
+
+    <section class="auth-panel">
+      <div class="auth-group grow">
+        <label for="apiKeyInput">API Key</label>
+        <input id="apiKeyInput" type="password" placeholder="Enter X-API-Key for protected endpoints" />
+      </div>
+      <button id="saveApiKeyButton">Save key</button>
+      <button id="clearApiKeyButton">Clear key</button>
+      <div id="authStatusMessage" class="auth-status"></div>
+    </section>
 
     <section class="stats-grid">
       <article class="stat-card">
@@ -120,6 +130,6 @@
     </section>
   </div>
 
-  <script src="/dashboard-assets/dashboard.js"></script>
+  <script src="/dashboard-assets/dashboard.js?v=3"></script>
 </body>
 </html>
