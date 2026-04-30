@@ -17,11 +17,13 @@ from app.db.models import Event, Incident, IncidentEvent
 from app.db.session import get_db
 from fastapi import APIRouter, Depends
 from app.core.auth import require_api_key
+from fastapi import APIRouter, Security
+from app.core.auth import require_api_key
 
 router = APIRouter(
     prefix="/incidents",
     tags=["incidents"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Security(require_api_key)],
 )
 
 DbSession = Annotated[Session, Depends(get_db)]

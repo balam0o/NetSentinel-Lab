@@ -1752,3 +1752,35 @@ def test_dashboard_js_sends_api_key_header(client):
     assert response.status_code == 200
     assert "X-API-Key" in response.text
     assert "localStorage" in response.text
+
+def test_openapi_contains_api_key_security_scheme(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    data = response.json()
+    schemes = data["components"]["securitySchemes"]
+
+    assert "ApiKeyAuth" in schemes
+    assert schemes["ApiKeyAuth"]["type"] == "apiKey"
+    assert schemes["ApiKeyAuth"]["in"] == "header"
+    assert schemes["ApiKeyAuth"]["name"] == "X-API-Key"
+
+
+def test_openapi_marks_incidents_endpoint_as_protected(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    data = response.json()
+    operation = data["paths"]["/incidents"]["get"]
+
+    assert {"ApiKeyAuth": []} in operation["security"]
+
+
+def test_openapi_marks_events_endpoint_as_protected(client):
+    response = client.get("/openapi.json")
+    assert response.status_code == 200
+
+    data = response.json()
+    operation = data["paths"]["/events/ingest"]["post"]
+
+    assert {"ApiKeyAuth": []} in operation["security"]

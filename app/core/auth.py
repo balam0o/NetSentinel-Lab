@@ -1,7 +1,7 @@
 import os
 import secrets
 
-from fastapi import Depends, HTTPException, status
+from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 
 from app.core.config import settings
@@ -9,7 +9,12 @@ from app.core.config import settings
 
 API_KEY_HEADER_NAME = "X-API-Key"
 
-api_key_header = APIKeyHeader(name=API_KEY_HEADER_NAME, auto_error=False)
+api_key_header = APIKeyHeader(
+    name=API_KEY_HEADER_NAME,
+    auto_error=False,
+    scheme_name="ApiKeyAuth",
+    description="Paste the value of the X-API-Key header here.",
+)
 
 
 def get_configured_api_key() -> str:
@@ -24,14 +29,16 @@ def is_auth_enabled() -> bool:
     return bool(get_configured_api_key())
 
 
-def require_api_key(api_key: str | None = Depends(api_key_header)) -> None:
+def require_api_key(api_key: str | None = Security(api_key_header)) -> str | None:
     configured_api_key = get_configured_api_key()
 
     if not configured_api_key:
-        return
+        return None
 
     if not api_key or not secrets.compare_digest(api_key, configured_api_key):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing API key",
         )
+
+    return api_key
