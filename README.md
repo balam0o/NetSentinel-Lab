@@ -49,6 +49,7 @@ This version includes:
 - Sample event simulation script
 - Automated tests with pytest
 - GitHub Actions CI
+- Close and reopen incidents directly from the dashboard
 
 ---
 
@@ -229,6 +230,7 @@ It provides:
 - text search for titles
 - incident detail view
 - incident timeline view
+- direct incident status updates from the UI
 
 ### 7. Summary statistics
 
@@ -368,7 +370,7 @@ The API exposes an enrichment endpoint that summarizes an incident with:
 7. Open the dashboard
 8. Filter incidents by status, severity, and title
 9. Open incident detail and timeline
-10. Manually close incidents when needed
+10. Close or reopen incidents directly from the dashboard
 
 ---
 
@@ -552,6 +554,7 @@ The dashboard shows:
 - a list of incidents
 - a detail panel for the selected incident
 - a timeline panel for linked events
+- an action button to close or reopen incidents
 
 It uses the same backend API endpoints already exposed by the service.
 
@@ -704,7 +707,6 @@ Planned improvements:
 
 - configurable attack-chain mappings
 - richer multi-event correlation rules
-- dashboard actions for incident closing
 - authentication and role-based access
 - better incident detail enrichment
 - dashboard charts

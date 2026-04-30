@@ -1712,3 +1712,15 @@ def test_dashboard_js_is_served(client):
     response = client.get("/dashboard-assets/dashboard.js")
     assert response.status_code == 200
     assert "refreshDashboard" in response.text
+
+def test_dashboard_page_contains_incident_action_button(client):
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "toggleIncidentStatusButton" in response.text
+
+
+def test_dashboard_js_contains_incident_status_update_action(client):
+    response = client.get("/dashboard-assets/dashboard.js")
+    assert response.status_code == 200
+    assert 'method: "PATCH"' in response.text
+    assert "toggleSelectedIncidentStatus" in response.text

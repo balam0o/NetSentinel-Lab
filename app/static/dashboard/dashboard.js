@@ -15,7 +15,11 @@ const statusFilterEl = document.getElementById("statusFilter");
 const severityFilterEl = document.getElementById("severityFilter");
 const titleFilterEl = document.getElementById("titleFilter");
 
+const toggleIncidentStatusButton = document.getElementById("toggleIncidentStatusButton");
+const incidentActionMessage = document.getElementById("incidentActionMessage");
+
 let selectedIncidentId = null;
+let selectedIncidentStatus = null;
 
 function formatDate(value) {
   if (!value) return "-";
@@ -39,6 +43,27 @@ function getTopSeverityLabel(incidentsBySeverity) {
   }
 
   return "-";
+}
+
+function setActionMessage(message = "", type = "") {
+  incidentActionMessage.textContent = message;
+  incidentActionMessage.className = "action-message";
+
+  if (type) {
+    incidentActionMessage.classList.add(type);
+  }
+}
+
+function updateIncidentActionButton() {
+  if (!selectedIncidentId || !selectedIncidentStatus) {
+    toggleIncidentStatusButton.disabled = true;
+    toggleIncidentStatusButton.textContent = "Select an incident";
+    return;
+  }
+
+  toggleIncidentStatusButton.disabled = false;
+  toggleIncidentStatusButton.textContent =
+    selectedIncidentStatus === "open" ? "Close incident" : "Reopen incident";
 }
 
 async function loadSummary() {
@@ -72,7 +97,7 @@ function buildIncidentQuery() {
   return `/incidents?${params.toString()}`;
 }
 
-async function loadIncidents() {
+async function loadIncidents(preferredIncidentId = selectedIncidentId) {
   incidentTableBody.innerHTML = `
     <tr>
       <td colspan="4" class="empty-state">Loading incidents...</td>
@@ -93,13 +118,18 @@ async function loadIncidents() {
     incidentDetailEl.textContent = "Select an incident to inspect details.";
     incidentTimelineEl.textContent = "Timeline will appear here after selecting an incident.";
     selectedIncidentId = null;
+    selectedIncidentStatus = null;
+    updateIncidentActionButton();
     return;
   }
 
   incidentTableBody.innerHTML = incidents
     .map(
       (incident) => `
-        <tr data-incident-id="${incident.id}">
+        <tr
+          data-incident-id="${incident.id}"
+          class="${String(incident.id) === String(preferredIncidentId) ? "selected-row" : ""}"
+        >
           <td>${escapeHtml(incident.title)}</td>
           <td><span class="badge">${escapeHtml(incident.severity)}</span></td>
           <td>${escapeHtml(incident.status)}</td>
@@ -113,15 +143,22 @@ async function loadIncidents() {
     row.addEventListener("click", () => {
       const incidentId = row.getAttribute("data-incident-id");
       selectedIncidentId = incidentId;
+      setActionMessage("");
+      loadIncidents(incidentId);
       loadIncidentDetail(incidentId);
       loadIncidentTimeline(incidentId);
     });
   });
 
-  const firstIncidentId = incidents[0].id;
-  selectedIncidentId = firstIncidentId;
-  loadIncidentDetail(firstIncidentId);
-  loadIncidentTimeline(firstIncidentId);
+  const selectedStillExists = incidents.some(
+    (incident) => String(incident.id) === String(preferredIncidentId)
+  );
+
+  const targetIncidentId = selectedStillExists ? preferredIncidentId : incidents[0].id;
+  selectedIncidentId = targetIncidentId;
+
+  await loadIncidentDetail(targetIncidentId);
+  await loadIncidentTimeline(targetIncidentId);
 }
 
 async function loadIncidentDetail(incidentId) {
@@ -129,6 +166,9 @@ async function loadIncidentDetail(incidentId) {
 
   const response = await fetch(`/incidents/${incidentId}/detail`);
   const data = await response.json();
+
+  selectedIncidentStatus = data.incident.status;
+  updateIncidentActionButton();
 
   incidentDetailEl.innerHTML = `
     <div class="detail-block">
@@ -173,12 +213,57 @@ async function loadIncidentTimeline(incidentId) {
     .join("");
 }
 
+async function toggleSelectedIncidentStatus() {
+  if (!selectedIncidentId || !selectedIncidentStatus) {
+    return;
+  }
+
+  const nextStatus = selectedIncidentStatus === "open" ? "closed" : "open";
+
+  toggleIncidentStatusButton.disabled = true;
+  setActionMessage("Updating incident status...");
+
+  try {
+    const response = await fetch(`/incidents/${selectedIncidentId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ status: nextStatus }),
+    });
+
+    if (!response.ok) {
+      throw new Error("Failed to update incident status.");
+    }
+
+    const updatedIncident = await response.json();
+    selectedIncidentStatus = updatedIncident.status;
+    updateIncidentActionButton();
+
+    setActionMessage(
+      `Incident updated to '${updatedIncident.status}'.`,
+      "success"
+    );
+
+    await loadSummary();
+    await loadIncidents(selectedIncidentId);
+  } catch (error) {
+    setActionMessage("Could not update incident status.", "error");
+    updateIncidentActionButton();
+  }
+}
+
 async function refreshDashboard() {
+  setActionMessage("");
   await loadSummary();
   await loadIncidents();
 }
 
 refreshButton.addEventListener("click", refreshDashboard);
-applyFiltersButton.addEventListener("click", loadIncidents);
+applyFiltersButton.addEventListener("click", async () => {
+  setActionMessage("");
+  await loadIncidents();
+});
+toggleIncidentStatusButton.addEventListener("click", toggleSelectedIncidentStatus);
 
 refreshDashboard();
