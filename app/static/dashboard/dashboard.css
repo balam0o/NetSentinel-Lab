@@ -343,3 +343,66 @@ tbody tr.selected-row {
     grid-template-columns: 1fr;
   }
 }
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.chart-content {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 180px;
+}
+
+.chart-empty {
+  color: #94a3b8;
+}
+
+.chart-row {
+  display: grid;
+  grid-template-columns: 140px 1fr 48px;
+  gap: 12px;
+  align-items: center;
+}
+
+.chart-label {
+  color: #e5e7eb;
+  font-size: 14px;
+  word-break: break-word;
+}
+
+.chart-bar-wrap {
+  width: 100%;
+  height: 14px;
+  background: #0b1220;
+  border: 1px solid #1f2937;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.chart-bar {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #2563eb, #60a5fa);
+}
+
+.chart-value {
+  text-align: right;
+  color: #cbd5e1;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.filters button {
+  white-space: nowrap;
+}
+
+@media (max-width: 1024px) {
+  .chart-grid {
+    grid-template-columns: 1fr;
+  }
+}

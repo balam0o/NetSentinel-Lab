@@ -13,6 +13,7 @@ const sourceChartEl = document.getElementById("sourceChart");
 
 const refreshButton = document.getElementById("refreshButton");
 const applyFiltersButton = document.getElementById("applyFiltersButton");
+const exportCsvButton = document.getElementById("exportCsvButton");
 
 const statusFilterEl = document.getElementById("statusFilter");
 const severityFilterEl = document.getElementById("severityFilter");
@@ -332,6 +333,42 @@ async function toggleSelectedIncidentStatus() {
   }
 }
 
+async function exportIncidentsCsv() {
+  try {
+    const response = await fetch(`/incidents/export/csv${buildIncidentQuery().replace("/incidents", "")}`, {
+      method: "GET",
+      headers: buildHeaders(),
+    });
+
+    if (response.status === 401) {
+      throw new Error("unauthorized");
+    }
+
+    if (!response.ok) {
+      throw new Error("export_failed");
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "netsentinel-incidents.csv";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.URL.revokeObjectURL(url);
+    setAuthStatus("CSV exported successfully.", "success");
+  } catch (error) {
+    if (error.message === "unauthorized") {
+      setAuthStatus("Unauthorized. Save a valid API key.", "error");
+    } else {
+      setAuthStatus("Could not export CSV.", "error");
+    }
+  }
+}
+
 async function refreshDashboard() {
   setActionMessage("");
 
@@ -392,6 +429,7 @@ applyFiltersButton.addEventListener("click", async () => {
   setActionMessage("");
   await loadIncidents();
 });
+exportCsvButton.addEventListener("click", exportIncidentsCsv);
 toggleIncidentStatusButton.addEventListener("click", toggleSelectedIncidentStatus);
 saveApiKeyButton.addEventListener("click", saveApiKey);
 clearApiKeyButton.addEventListener("click", clearApiKey);

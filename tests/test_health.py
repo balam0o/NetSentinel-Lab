@@ -1797,3 +1797,79 @@ def test_dashboard_js_contains_chart_rendering_logic(client):
     assert response.status_code == 200
     assert "renderBarChart" in response.text
     assert "renderCharts" in response.text
+
+def test_export_incidents_csv(client):
+    payload = {
+        "source": "falco",
+        "event_type": "credential_access",
+        "severity": "high",
+        "hostname": "node-export",
+        "container_name": "billing-service",
+        "raw_event_json": {"file": "/etc/shadow"},
+    }
+
+    response = client.post("/events/ingest", json=payload)
+    assert response.status_code == 201
+
+    export_response = client.get("/incidents/export/csv")
+    assert export_response.status_code == 200
+    assert "text/csv" in export_response.headers["content-type"]
+    assert "title" in export_response.text
+    assert "credential_access on node-export/billing-service" in export_response.text
+
+
+def test_export_incidents_csv_respects_filters(client):
+    payloads = [
+        {
+            "source": "falco",
+            "event_type": "credential_access",
+            "severity": "high",
+            "hostname": "node-export-a",
+            "container_name": "payments-service",
+            "raw_event_json": {"file": "/etc/shadow"},
+        },
+        {
+            "source": "falco",
+            "event_type": "reverse_shell_detected",
+            "severity": "critical",
+            "hostname": "node-export-b",
+            "container_name": "gateway-api",
+            "raw_event_json": {"rule": "Reverse shell detected"},
+        },
+    ]
+
+    for payload in payloads:
+        response = client.post("/events/ingest", json=payload)
+        assert response.status_code == 201
+
+    export_response = client.get("/incidents/export/csv?severity=critical")
+    assert export_response.status_code == 200
+    assert "reverse_shell_detected on node-export-b/gateway-api" in export_response.text
+    assert "credential_access on node-export-a/payments-service" not in export_response.text
+
+
+def test_dashboard_contains_export_csv_button(client):
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "exportCsvButton" in response.text
+
+
+def test_dashboard_js_contains_csv_export_logic(client):
+    response = client.get("/dashboard-assets/dashboard.js?v=5")
+    assert response.status_code == 200
+    assert "exportIncidentsCsv" in response.text
+    assert "netsentinel-incidents.csv" in response.text
+
+
+def test_dashboard_contains_chart_panels(client):
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "severityChart" in response.text
+    assert "sourceChart" in response.text
+
+
+def test_dashboard_js_contains_chart_rendering_logic(client):
+    response = client.get("/dashboard-assets/dashboard.js?v=5")
+    assert response.status_code == 200
+    assert "renderBarChart" in response.text
+    assert "renderCharts" in response.text

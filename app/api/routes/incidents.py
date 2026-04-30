@@ -19,6 +19,9 @@ from fastapi import APIRouter, Depends
 from app.core.auth import require_api_key
 from fastapi import APIRouter, Security
 from app.core.auth import require_api_key
+import csv
+from io import StringIO
+from fastapi.responses import Response
 
 router = APIRouter(
     prefix="/incidents",
@@ -116,6 +119,65 @@ def list_incidents(
     incidents = db.execute(statement).scalars().all()
     return incidents
 
+@router.get("/export/csv", response_class=Response)
+def export_incidents_csv(
+    status: str | None = Query(default=None),
+    severity: str | None = Query(default=None),
+    title_contains: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    statement = select(Incident)
+
+    if status:
+        statement = statement.where(Incident.status == status)
+
+    if severity:
+        statement = statement.where(Incident.severity == severity)
+
+    if title_contains:
+        statement = statement.where(Incident.title.ilike(f"%{title_contains}%"))
+
+    statement = statement.order_by(Incident.last_seen.desc(), Incident.id.desc())
+
+    incidents = db.execute(statement).scalars().all()
+
+    buffer = StringIO()
+    writer = csv.writer(buffer)
+
+    writer.writerow(
+        [
+            "id",
+            "title",
+            "description",
+            "severity",
+            "status",
+            "first_seen",
+            "last_seen",
+            "correlation_key",
+        ]
+    )
+
+    for incident in incidents:
+        writer.writerow(
+            [
+                incident.id,
+                incident.title,
+                incident.description,
+                incident.severity,
+                incident.status,
+                incident.first_seen.isoformat() if incident.first_seen else "",
+                incident.last_seen.isoformat() if incident.last_seen else "",
+                incident.correlation_key,
+            ]
+        )
+
+    return Response(
+        content=buffer.getvalue(),
+        media_type="text/csv",
+        headers={
+            "Content-Disposition": 'attachment; filename="netsentinel-incidents.csv"'
+        },
+    )
 
 @router.get("/{incident_id}/detail", response_model=IncidentDetailResponse)
 def get_incident_detail(

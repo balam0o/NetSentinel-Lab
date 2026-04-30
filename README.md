@@ -46,11 +46,14 @@ This version includes:
 - Filtering for events and incidents
 - Pagination and configurable sorting
 - Minimal dashboard UI served by FastAPI
+- Close and reopen incidents directly from the dashboard
+- Visual dashboard charts for incident severity and event sources
+- CSV export for filtered incidents
+- API key authentication for protected endpoints
+- Swagger authorization support for API key usage
 - Sample event simulation script
 - Automated tests with pytest
 - GitHub Actions CI
-- Close and reopen incidents directly from the dashboard
-- Visual dashboard charts for incident severity and event sources
 
 ---
 
@@ -127,7 +130,7 @@ netsentinel-lab/
   Pydantic request and response models
 
 - `app/core/`  
-  Configuration and app settings
+  Configuration, settings, and auth helpers
 
 - `app/db/`  
   Database session and ORM models
@@ -218,6 +221,7 @@ The API supports querying:
 - a detailed incident view with linked events
 - a chronological incident timeline
 - an enriched incident summary
+- incident export as CSV
 
 ### 6. Minimal dashboard UI
 
@@ -233,6 +237,7 @@ It provides:
 - incident timeline view
 - direct incident status updates from the UI
 - visual charts for incident severity and event sources
+- CSV export of filtered incidents
 
 ### 7. Summary statistics
 
@@ -323,6 +328,17 @@ The API exposes an enrichment endpoint that summarizes an incident with:
 - counts by severity
 - counts by event type
 
+### 14. API key authentication
+
+Protected endpoints can require an API key sent via the `X-API-Key` header.
+
+Behavior:
+
+- if `NETSENTINEL_API_KEY` is empty, auth is disabled
+- if `NETSENTINEL_API_KEY` has a value, protected endpoints require the key
+- Swagger supports the key through the **Authorize** button
+- the dashboard can store and reuse the key locally in the browser
+
 ---
 
 ## API endpoints
@@ -343,6 +359,7 @@ The API exposes an enrichment endpoint that summarizes an incident with:
 ### Incidents
 
 - `GET /incidents`
+- `GET /incidents/export/csv`
 - `GET /incidents/{id}`
 - `GET /incidents/{id}/events`
 - `GET /incidents/{id}/detail`
@@ -373,6 +390,7 @@ The API exposes an enrichment endpoint that summarizes an incident with:
 8. Filter incidents by status, severity, and title
 9. Open incident detail and timeline
 10. Close or reopen incidents directly from the dashboard
+11. Export filtered incidents as CSV
 
 ---
 
@@ -416,6 +434,7 @@ CORRELATION_WINDOW_HOURS=24
 MEDIUM_BURST_THRESHOLD=3
 MEDIUM_BURST_WINDOW_MINUTES=15
 ATTACK_CHAIN_WINDOW_MINUTES=10
+NETSENTINEL_API_KEY=super-secret-demo-key
 ```
 
 ### Configurable correlation settings
@@ -427,6 +446,19 @@ ATTACK_CHAIN_WINDOW_MINUTES=10
 `MEDIUM_BURST_WINDOW_MINUTES` controls the time window for that burst rule.
 
 `ATTACK_CHAIN_WINDOW_MINUTES` controls how far back the correlator looks for precursor events like `port_scan_detected`.
+
+### Authentication setting
+
+`NETSENTINEL_API_KEY` controls access to protected endpoints.
+
+- empty value: auth disabled
+- non-empty value: `events`, `incidents`, and `stats` endpoints require `X-API-Key`
+
+Recommended for `.env.example`:
+
+```env
+NETSENTINEL_API_KEY=
+```
 
 ---
 
@@ -454,6 +486,13 @@ To rebuild containers after code changes:
 
 ```bash
 docker compose -f infra/docker-compose.yml down
+docker compose -f infra/docker-compose.yml up -d --build
+```
+
+If the database state becomes inconsistent during development, reset volumes:
+
+```bash
+docker compose -f infra/docker-compose.yml down -v
 docker compose -f infra/docker-compose.yml up -d --build
 ```
 
@@ -538,6 +577,11 @@ The test suite covers:
 - pagination and sorting
 - dashboard page availability
 - dashboard static assets
+- dashboard status actions
+- dashboard charts
+- CSV export for incidents
+- API key protection
+- Swagger API key support
 
 ---
 
@@ -552,25 +596,69 @@ http://localhost:8000/dashboard
 The dashboard shows:
 
 - summary cards at the top
+- chart panels for severity and sources
 - a filter bar
 - a list of incidents
 - a detail panel for the selected incident
 - a timeline panel for linked events
 - an action button to close or reopen incidents
-
-It uses the same backend API endpoints already exposed by the service.
+- an export button for filtered CSV output
 
 The dashboard also includes chart panels that visualize:
 
 - incidents grouped by severity
 - events grouped by source
 
+It uses the same backend API endpoints already exposed by the service.
+
+### Dashboard auth flow
+
+If auth is enabled:
+
+1. enter your API key in the dashboard
+2. click `Save key`
+3. use the protected data and actions normally
+
+The key is stored locally in the browser so the dashboard can reuse it.
+
+---
+
+## Swagger usage with API key
+
+Open:
+
+```text
+http://localhost:8000/docs
+```
+
+If auth is enabled:
+
+1. click **Authorize**
+2. paste only the value of the key
+3. confirm authorization
+4. call protected endpoints normally
+
+Swagger sends the value as the `X-API-Key` header automatically.
+
+---
+
+## Dashboard preview
+
+### Overview
+![NetSentinel dashboard overview](docs/images/dashboard-overview.png)
+
+### Incident detail
+![NetSentinel incident detail](docs/images/dashboard-detail.png)
+
+### Timeline view
+![NetSentinel incident timeline](docs/images/dashboard-timeline.png)
+
 ---
 
 ## Generic event ingestion example
 
 ```bash
-curl -X POST "http://localhost:8000/events/ingest"   -H "Content-Type: application/json"   -d '{
+curl -X POST "http://localhost:8000/events/ingest"   -H "Content-Type: application/json"   -H "X-API-Key: super-secret-demo-key"   -d '{
     "source": "falco",
     "event_type": "reverse_shell_detected",
     "severity": "critical",
@@ -582,6 +670,14 @@ curl -X POST "http://localhost:8000/events/ingest"   -H "Content-Type: applicati
       "process": "bash"
     }
   }'
+```
+
+---
+
+## Incident CSV export example
+
+```bash
+curl -H "X-API-Key: super-secret-demo-key"   "http://localhost:8000/incidents/export/csv?severity=critical"
 ```
 
 ---
@@ -605,6 +701,32 @@ An event creates or updates an incident if:
 
 - severity is `high` or `critical`
 
+### Correlation key
+
+The correlator uses a source-aware matching key so events from different telemetry systems are not merged by mistake.
+
+### Severity escalation
+
+If a matching incident already exists and a more severe event arrives later, the incident severity is raised.
+
+### Reopening behavior
+
+If a matching incident was previously closed and a new relevant event arrives inside the window, the incident is reopened automatically.
+
+### Temporal window
+
+A matching incident is only reused if its `last_seen` is recent enough.
+
+The window is controlled by:
+
+- `CORRELATION_WINDOW_HOURS`
+
+Default:
+
+- `24`
+
+If the last matching activity is older than the configured window, a new incident is created.
+
 ### Medium burst promotion
 
 Repeated medium events can also create incidents.
@@ -613,6 +735,14 @@ Controlled by:
 
 - `MEDIUM_BURST_THRESHOLD`
 - `MEDIUM_BURST_WINDOW_MINUTES`
+
+Default rule:
+
+- **3 medium events**
+- with the **same source-aware pattern**
+- within **15 minutes**
+
+When that happens, the system creates a **high** incident and links the related medium events to it.
 
 ### Attack-chain correlation
 
@@ -628,6 +758,12 @@ Current sequence rule:
 - followed by `credential_access` or `reverse_shell_detected`
 - with the same source, host, and container
 - within the configured attack-chain window
+
+Default:
+
+- **10 minutes**
+
+When that happens, the incident severity is elevated to **critical**, and the precursor event is linked to the same incident.
 
 ### Incident exclusions
 
@@ -714,9 +850,10 @@ Planned improvements:
 
 - configurable attack-chain mappings
 - richer multi-event correlation rules
-- authentication and role-based access
+- JSON export for detailed incidents
+- role-based access control
 - better incident detail enrichment
-- dashboard charts
+- dashboard charts with trends over time
 - Kubernetes deployment with kind or minikube
 
 ---
@@ -726,10 +863,10 @@ Planned improvements:
 This is an early lab implementation, so there are important limitations:
 
 - correlation logic is still intentionally simple
-- there is no authentication yet
 - there are no database migrations yet
 - the dashboard is intentionally minimal
 - events are ingested manually or from sample scripts
+- authentication is API-key based and not yet user/role aware
 
 
 ---
@@ -755,7 +892,10 @@ This project is structured to grow in layers:
 15. configurable rule thresholds
 16. attack-chain correlation
 17. dashboard visualization
-18. future integrations and orchestration
+18. UI actions
+19. authentication
+20. export workflows
+21. future integrations and orchestration
 
 The focus is not to add unnecessary complexity too early.
 
@@ -770,14 +910,3 @@ The focus is not to add unnecessary complexity too early.
 ## Author
 
 Built as a portfolio project focused on backend engineering, security event processing, and cloud-native defensive workflows.
-
-## Dashboard preview
-
-### Overview
-![NetSentinel dashboard overview](docs/images/dashboard-overview.png)
-
-### Incident detail
-![NetSentinel incident detail](docs/images/dashboard-detail.png)
-
-### Timeline view
-![NetSentinel incident timeline](docs/images/dashboard-timeline.png)
