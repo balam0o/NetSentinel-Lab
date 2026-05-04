@@ -20,6 +20,7 @@ const severityFilterEl = document.getElementById("severityFilter");
 const titleFilterEl = document.getElementById("titleFilter");
 
 const toggleIncidentStatusButton = document.getElementById("toggleIncidentStatusButton");
+const exportIncidentJsonButton = document.getElementById("exportIncidentJsonButton");
 const incidentActionMessage = document.getElementById("incidentActionMessage");
 
 const apiKeyInputEl = document.getElementById("apiKeyInput");
@@ -84,12 +85,15 @@ function updateIncidentActionButton() {
   if (!selectedIncidentId || !selectedIncidentStatus) {
     toggleIncidentStatusButton.disabled = true;
     toggleIncidentStatusButton.textContent = "Select an incident";
+    exportIncidentJsonButton.disabled = true;
     return;
   }
 
   toggleIncidentStatusButton.disabled = false;
   toggleIncidentStatusButton.textContent =
     selectedIncidentStatus === "open" ? "Close incident" : "Reopen incident";
+
+  exportIncidentJsonButton.disabled = false;
 }
 
 function buildHeaders(extraHeaders = {}) {
@@ -369,6 +373,52 @@ async function exportIncidentsCsv() {
   }
 }
 
+async function exportSelectedIncidentJson() {
+  if (!selectedIncidentId) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/incidents/${selectedIncidentId}/export/json`, {
+      method: "GET",
+      headers: buildHeaders(),
+    });
+
+    if (response.status === 401) {
+      throw new Error("unauthorized");
+    }
+
+    if (response.status === 404) {
+      throw new Error("not_found");
+    }
+
+    if (!response.ok) {
+      throw new Error("export_failed");
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `netsentinel-incident-${selectedIncidentId}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.URL.revokeObjectURL(url);
+    setActionMessage("Incident JSON exported successfully.", "success");
+  } catch (error) {
+    if (error.message === "unauthorized") {
+      setActionMessage("Unauthorized. Save a valid API key.", "error");
+    } else if (error.message === "not_found") {
+      setActionMessage("Incident not found.", "error");
+    } else {
+      setActionMessage("Could not export incident JSON.", "error");
+    }
+  }
+}
+
 async function refreshDashboard() {
   setActionMessage("");
 
@@ -431,6 +481,7 @@ applyFiltersButton.addEventListener("click", async () => {
 });
 exportCsvButton.addEventListener("click", exportIncidentsCsv);
 toggleIncidentStatusButton.addEventListener("click", toggleSelectedIncidentStatus);
+exportIncidentJsonButton.addEventListener("click", exportSelectedIncidentJson);
 saveApiKeyButton.addEventListener("click", saveApiKey);
 clearApiKeyButton.addEventListener("click", clearApiKey);
 

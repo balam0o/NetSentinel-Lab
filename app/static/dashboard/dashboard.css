@@ -406,3 +406,8 @@ tbody tr.selected-row {
     grid-template-columns: 1fr;
   }
 }
+
+.secondary-note {
+  color: #94a3b8;
+  font-size: 13px;
+}

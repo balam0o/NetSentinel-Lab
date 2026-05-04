@@ -54,6 +54,7 @@ This version includes:
 - Sample event simulation script
 - Automated tests with pytest
 - GitHub Actions CI
+- JSON export for complete incident investigation packages
 
 ---
 

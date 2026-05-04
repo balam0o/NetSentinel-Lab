@@ -22,6 +22,8 @@ from app.core.auth import require_api_key
 import csv
 from io import StringIO
 from fastapi.responses import Response
+import json
+from datetime import datetime, timezone
 
 router = APIRouter(
     prefix="/incidents",
@@ -34,6 +36,24 @@ DbSession = Annotated[Session, Depends(get_db)]
 IncidentSortField = Literal["last_seen", "first_seen", "title", "status", "severity"]
 SortOrder = Literal["asc", "desc"]
 
+
+def export_datetime(value):
+    return value.isoformat() if value else None
+
+
+def build_export_event_summary(event: Event) -> str:
+    raw = event.raw_event_json or {}
+
+    if isinstance(raw, dict):
+        return (
+            raw.get("rule")
+            or raw.get("signature")
+            or raw.get("message")
+            or raw.get("output")
+            or event.event_type
+        )
+
+    return event.event_type
 
 def build_timeline_summary(event: Event) -> str:
     raw = event.raw_event_json or {}
@@ -80,6 +100,108 @@ def get_incident_linked_events(
 
     return db.execute(statement).scalars().all()
 
+
+@router.get("/{incident_id}/export/json", response_class=Response)
+def export_incident_json(
+    incident_id: int,
+    db: Session = Depends(get_db),
+):
+    incident = db.get(Incident, incident_id)
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    statement = (
+        select(Event)
+        .join(IncidentEvent, IncidentEvent.event_id == Event.id)
+        .where(IncidentEvent.incident_id == incident_id)
+        .order_by(Event.created_at.asc(), Event.id.asc())
+    )
+
+    events = db.execute(statement).scalars().all()
+
+    counts_by_source = {}
+    counts_by_severity = {}
+    counts_by_event_type = {}
+
+    sources_seen = set()
+    hosts_seen = set()
+    containers_seen = set()
+    event_types_seen = set()
+
+    timeline = []
+
+    for event in events:
+        counts_by_source[event.source] = counts_by_source.get(event.source, 0) + 1
+        counts_by_severity[event.severity] = counts_by_severity.get(event.severity, 0) + 1
+        counts_by_event_type[event.event_type] = counts_by_event_type.get(event.event_type, 0) + 1
+
+        if event.source:
+            sources_seen.add(event.source)
+        if event.hostname:
+            hosts_seen.add(event.hostname)
+        if event.container_name:
+            containers_seen.add(event.container_name)
+        if event.event_type:
+            event_types_seen.add(event.event_type)
+
+        timeline.append(
+            {
+                "event_id": event.id,
+                "event_type": event.event_type,
+                "source": event.source,
+                "severity": event.severity,
+                "created_at": export_datetime(event.created_at),
+                "summary": build_export_event_summary(event),
+            }
+        )
+
+    payload = {
+        "exported_at": datetime.now(timezone.utc).isoformat(),
+        "incident": {
+            "id": incident.id,
+            "title": incident.title,
+            "description": incident.description,
+            "severity": incident.severity,
+            "status": incident.status,
+            "correlation_key": incident.correlation_key,
+            "first_seen": export_datetime(incident.first_seen),
+            "last_seen": export_datetime(incident.last_seen),
+        },
+        "event_count": len(events),
+        "events": [
+            {
+                "id": event.id,
+                "source": event.source,
+                "event_type": event.event_type,
+                "severity": event.severity,
+                "hostname": event.hostname,
+                "container_name": event.container_name,
+                "raw_event_json": event.raw_event_json,
+                "created_at": export_datetime(event.created_at),
+            }
+            for event in events
+        ],
+        "timeline": timeline,
+        "enrichment": {
+            "sources_seen": sorted(sources_seen),
+            "hosts_seen": sorted(hosts_seen),
+            "containers_seen": sorted(containers_seen),
+            "event_types_seen": sorted(event_types_seen),
+            "counts_by_source": counts_by_source,
+            "counts_by_severity": counts_by_severity,
+            "counts_by_event_type": counts_by_event_type,
+            "first_activity": export_datetime(events[0].created_at) if events else None,
+            "last_activity": export_datetime(events[-1].created_at) if events else None,
+        },
+    }
+
+    return Response(
+        content=json.dumps(payload, indent=2),
+        media_type="application/json",
+        headers={
+            "Content-Disposition": f'attachment; filename="netsentinel-incident-{incident_id}.json"'
+        },
+    )
 
 @router.get("", response_model=list[IncidentResponse])
 def list_incidents(

@@ -1873,3 +1873,48 @@ def test_dashboard_js_contains_chart_rendering_logic(client):
     assert response.status_code == 200
     assert "renderBarChart" in response.text
     assert "renderCharts" in response.text
+
+def test_export_single_incident_json(client):
+    payload = {
+        "source": "falco",
+        "event_type": "reverse_shell_detected",
+        "severity": "critical",
+        "hostname": "node-json-export",
+        "container_name": "gateway-api",
+        "raw_event_json": {"rule": "Reverse shell detected"},
+    }
+
+    response = client.post("/events/ingest", json=payload)
+    assert response.status_code == 201
+
+    incidents_response = client.get("/incidents?title_contains=gateway-api")
+    assert incidents_response.status_code == 200
+    incidents = incidents_response.json()
+    assert len(incidents) >= 1
+
+    incident_id = incidents[0]["id"]
+
+    export_response = client.get(f"/incidents/{incident_id}/export/json")
+    assert export_response.status_code == 200
+    assert "application/json" in export_response.headers["content-type"]
+    assert f'"id": {incident_id}' in export_response.text
+    assert '"timeline"' in export_response.text
+    assert '"enrichment"' in export_response.text
+
+
+def test_export_single_incident_json_not_found(client):
+    response = client.get("/incidents/999999/export/json")
+    assert response.status_code == 404
+
+
+def test_dashboard_contains_export_incident_json_button(client):
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "exportIncidentJsonButton" in response.text
+
+
+def test_dashboard_js_contains_incident_json_export_logic(client):
+    response = client.get("/dashboard-assets/dashboard.js?v=6")
+    assert response.status_code == 200
+    assert "exportSelectedIncidentJson" in response.text
+    assert "netsentinel-incident-" in response.text
