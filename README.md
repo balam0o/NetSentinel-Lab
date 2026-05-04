@@ -49,12 +49,13 @@ This version includes:
 - Close and reopen incidents directly from the dashboard
 - Visual dashboard charts for incident severity and event sources
 - CSV export for filtered incidents
+- JSON export for complete incident investigation packages
 - API key authentication for protected endpoints
 - Swagger authorization support for API key usage
+- Public deployment on Render
 - Sample event simulation script
 - Automated tests with pytest
 - GitHub Actions CI
-- JSON export for complete incident investigation packages
 
 ---
 
@@ -96,6 +97,7 @@ This makes the project useful as a starting point for a future SOC-style lab, in
 - **HTML / CSS**
 - **pytest**
 - **GitHub Actions**
+- **Render**
 
 ---
 
@@ -113,13 +115,19 @@ netsentinel-lab/
 │  └─ static/
 │     └─ dashboard/
 ├─ docker/
+├─ docs/
+│  └─ images/
 ├─ infra/
 ├─ lab/
 │  └─ sample_events/
 ├─ scripts/
 ├─ tests/
-└─ .github/
-   └─ workflows/
+├─ .github/
+│  └─ workflows/
+├─ render.yaml
+├─ .env.example
+├─ pyproject.toml
+└─ README.md
 ```
 
 ### Main folders
@@ -150,6 +158,17 @@ netsentinel-lab/
 
 - `tests/`  
   API and dashboard behavior tests
+
+- `docs/images/`  
+  Screenshots used in the README
+
+---
+
+## Live demo
+
+- API root: https://netsentinel-api.onrender.com/
+- Swagger docs: https://netsentinel-api.onrender.com/docs
+- Dashboard: https://netsentinel-api.onrender.com/dashboard
 
 ---
 
@@ -223,6 +242,7 @@ The API supports querying:
 - a chronological incident timeline
 - an enriched incident summary
 - incident export as CSV
+- full incident export as JSON
 
 ### 6. Minimal dashboard UI
 
@@ -239,6 +259,7 @@ It provides:
 - direct incident status updates from the UI
 - visual charts for incident severity and event sources
 - CSV export of filtered incidents
+- JSON export for the selected incident
 
 ### 7. Summary statistics
 
@@ -340,6 +361,18 @@ Behavior:
 - Swagger supports the key through the **Authorize** button
 - the dashboard can store and reuse the key locally in the browser
 
+### 15. Deployment on Render
+
+The app is configured for Render deployment using a Blueprint.
+
+It includes:
+
+- `render.yaml` in the repository root
+- a managed Postgres database
+- automatic wiring of `DATABASE_URL`
+- public dashboard and docs URLs
+- health check support through `/health`
+
 ---
 
 ## API endpoints
@@ -366,6 +399,7 @@ Behavior:
 - `GET /incidents/{id}/detail`
 - `GET /incidents/{id}/timeline`
 - `GET /incidents/{id}/enrichment`
+- `GET /incidents/{id}/export/json`
 - `PATCH /incidents/{id}`
 
 ### Dashboard
@@ -392,6 +426,7 @@ Behavior:
 9. Open incident detail and timeline
 10. Close or reopen incidents directly from the dashboard
 11. Export filtered incidents as CSV
+12. Export a full incident investigation package as JSON
 
 ---
 
@@ -501,12 +536,18 @@ docker compose -f infra/docker-compose.yml up -d --build
 
 ## Application URLs
 
-Once the stack is running:
+Once the stack is running locally:
 
 - API root: `http://localhost:8000/`
 - Swagger docs: `http://localhost:8000/docs`
 - Health check: `http://localhost:8000/health`
 - Dashboard: `http://localhost:8000/dashboard`
+
+Production demo:
+
+- API root: `https://netsentinel-api.onrender.com/`
+- Swagger docs: `https://netsentinel-api.onrender.com/docs`
+- Dashboard: `https://netsentinel-api.onrender.com/dashboard`
 
 ---
 
@@ -581,6 +622,7 @@ The test suite covers:
 - dashboard status actions
 - dashboard charts
 - CSV export for incidents
+- full incident JSON export
 - API key protection
 - Swagger API key support
 
@@ -594,6 +636,12 @@ Open:
 http://localhost:8000/dashboard
 ```
 
+or the deployed version:
+
+```text
+https://netsentinel-api.onrender.com/dashboard
+```
+
 The dashboard shows:
 
 - summary cards at the top
@@ -604,6 +652,7 @@ The dashboard shows:
 - a timeline panel for linked events
 - an action button to close or reopen incidents
 - an export button for filtered CSV output
+- an export button for the selected incident JSON package
 
 The dashboard also includes chart panels that visualize:
 
@@ -630,6 +679,12 @@ Open:
 
 ```text
 http://localhost:8000/docs
+```
+
+or the deployed version:
+
+```text
+https://netsentinel-api.onrender.com/docs
 ```
 
 If auth is enabled:
@@ -679,6 +734,14 @@ curl -X POST "http://localhost:8000/events/ingest"   -H "Content-Type: applicati
 
 ```bash
 curl -H "X-API-Key: super-secret-demo-key"   "http://localhost:8000/incidents/export/csv?severity=critical"
+```
+
+---
+
+## Incident JSON export example
+
+```bash
+curl -H "X-API-Key: super-secret-demo-key"   "http://localhost:8000/incidents/1/export/json"
 ```
 
 ---
@@ -819,6 +882,23 @@ Key fields:
 
 ---
 
+## Deployment notes
+
+The project is configured for deployment on Render using:
+
+- `render.yaml`
+- `docker/api.Dockerfile`
+- a managed Render Postgres instance
+- a public web service URL
+
+When deploying to Render:
+
+- the app should listen on `0.0.0.0`
+- the database URL may need normalization from `postgresql://` to `postgresql+psycopg://`
+- `NETSENTINEL_API_KEY` should be configured as a secret environment variable
+
+---
+
 ## CI
 
 This repository includes a GitHub Actions workflow that:
@@ -851,10 +931,10 @@ Planned improvements:
 
 - configurable attack-chain mappings
 - richer multi-event correlation rules
-- JSON export for detailed incidents
 - role-based access control
 - better incident detail enrichment
 - dashboard charts with trends over time
+- alert notifications
 - Kubernetes deployment with kind or minikube
 
 ---
@@ -868,7 +948,7 @@ This is an early lab implementation, so there are important limitations:
 - the dashboard is intentionally minimal
 - events are ingested manually or from sample scripts
 - authentication is API-key based and not yet user/role aware
-
+- the free Render Postgres tier is suitable for demos, not long-term production
 
 ---
 
@@ -896,7 +976,8 @@ This project is structured to grow in layers:
 18. UI actions
 19. authentication
 20. export workflows
-21. future integrations and orchestration
+21. public deployment
+22. future integrations and orchestration
 
 The focus is not to add unnecessary complexity too early.
 
